@@ -194,6 +194,7 @@ def analyze_symbol(
                 s.sweep and s.displacement and any(
                     event.direction == ("bullish" if s.direction == "BUY" else "bearish")
                     and event.event_type in ("BOS", "CHOCH", "MSS")
+                    and event.confirmed_by_close
                     and event.time >= s.sweep.time
                     and event.time >= s.displacement.time
                     for event in bos_events
