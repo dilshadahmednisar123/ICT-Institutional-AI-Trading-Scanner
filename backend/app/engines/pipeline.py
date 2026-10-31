@@ -165,11 +165,17 @@ def analyze_symbol(
         m2022 = evaluate_ict_2022(
             symbol, current_price, bias, sweeps, displacements, fvgs, order_blocks,
             pools, dealing, pd_class, atr, min_rr, structure_events=bos_events,
+            current_bar_high=float(df.iloc[-1]["high"]),
+            current_bar_low=float(df.iloc[-1]["low"]),
         )
         msb = evaluate_silver_bullet(symbol, current_price, bias, sweeps, displacements, fvgs, pools, atr, min_rr, now)
         muni = evaluate_unicorn(symbol, current_price, bias, sweeps, displacements, fvgs, order_blocks, pools, atr, min_rr)
         mts = evaluate_turtle_soup(symbol, current_price, bias, sweeps, displacements, pools, atr, min_rr)
-        mote = evaluate_ote(symbol, current_price, bias, dealing, sweeps, displacements, fvgs, pools, atr, min_rr)
+        mote = evaluate_ote(
+            symbol, current_price, bias, dealing, sweeps, displacements, fvgs, pools, atr, min_rr,
+            current_bar_high=float(df.iloc[-1]["high"]),
+            current_bar_low=float(df.iloc[-1]["low"]),
+        )
         mjud = evaluate_judas(symbol, current_price, bias, sweeps, displacements, pools, atr, min_rr, now)
         mpo3 = evaluate_po3(symbol, current_price, bias, df, sweeps, displacements, pools, atr, min_rr)
 
