@@ -52,6 +52,42 @@ jobs:
           PY
       - name: Market-data quality and ICT engine unit tests
         run: python -m pytest -q tests/test_market_data_and_ict.py
+      - name: Walk-forward backtest on real historical market candles
+        run: |
+          python - <<'PY'
+          import json
+          from app.engines.backtest import run_backtest
+          reports = []
+          for symbol in ("EURUSD", "XAUUSD"):
+              report = run_backtest(symbol, timeframe="15M", limit=500, step=20, window_size=200)
+              payload = report.to_dict()
+              assert payload["bars_used"] >= 210, payload
+              assert payload["period_start"] and payload["period_end"], payload
+              assert payload["data_provider"] not in ("unavailable", "SyntheticDataProvider"), payload
+              reports.append(payload)
+              print(json.dumps({
+                  "symbol": symbol,
+                  "provider": payload["data_provider"],
+                  "bars": payload["bars_used"],
+                  "period_start": payload["period_start"],
+                  "period_end": payload["period_end"],
+                  "trades": payload["total"],
+                  "wins": payload["wins"],
+                  "losses": payload["losses"],
+                  "win_rate": payload["win_rate"],
+                  "net_r": payload["net_r"],
+                  "profit_factor": payload["profit_factor"],
+              }, sort_keys=True))
+          with open("historical-backtest.json", "w") as f:
+              json.dump(reports, f, indent=2)
+          PY
+      - name: Upload historical backtest report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ict-historical-backtest-${{ github.run_number }}
+          path: backend/historical-backtest.json
+          if-no-files-found: error
       - name: Production market-data and persistent-history acceptance
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
