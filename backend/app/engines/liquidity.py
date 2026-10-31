@@ -188,7 +188,7 @@ def detect_sweeps(
     if df.empty or not pools:
         return []
 
-    df = df.tail(lookback).copy()
+    df = df.tail(lookback).copy().reset_index(drop=True)
     sweeps: List[LiquiditySweep] = []
 
     times = pd.to_datetime(df["timestamp"]) if "timestamp" in df.columns else df.index
