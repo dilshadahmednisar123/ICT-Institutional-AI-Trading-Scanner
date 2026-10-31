@@ -136,9 +136,26 @@ def analyze_symbol(
         atr = float(atr_series.iloc[-1]) if len(atr_series) else None
         order_blocks = detect_order_blocks(df, displacements=displacements, timeframe=timeframe)
         active_obs = get_active_order_blocks(order_blocks, current_price)
-        bias = structure.get("bias", "neutral")
 
-        m2022 = evaluate_ict_2022(symbol, current_price, bias, sweeps, displacements, fvgs, order_blocks, pools, dealing, pd_class, atr, min_rr)
+        # Derive directional context from a separate higher timeframe.
+        htf_timeframe = "4H" if timeframe.upper() in ("1M", "5M", "15M", "30M") else "1D"
+        htf_bias = "neutral"
+        htf_note = "HTF bias unavailable; neutral context applied"
+        try:
+            htf_df = provider.get_ohlc(symbol, htf_timeframe, limit=240)
+            htf_quality = provider.validate(htf_df, symbol, htf_timeframe)
+            if htf_quality.is_valid and not htf_quality.stale and len(htf_df) >= 30:
+                htf_swings = find_swing_points(htf_df, left=3, right=3, strength="intermediate")
+                htf_bias = classify_structure(htf_swings).get("bias", "neutral")
+                htf_note = f"HTF {htf_timeframe} bias: {htf_bias}"
+        except Exception as htf_exc:
+            htf_note = f"HTF data unavailable: {type(htf_exc).__name__}"
+        bias = htf_bias
+
+        m2022 = evaluate_ict_2022(
+            symbol, current_price, bias, sweeps, displacements, fvgs, order_blocks,
+            pools, dealing, pd_class, atr, min_rr, structure_events=bos_events,
+        )
         msb = evaluate_silver_bullet(symbol, current_price, bias, sweeps, displacements, fvgs, pools, atr, min_rr, now)
         muni = evaluate_unicorn(symbol, current_price, bias, sweeps, displacements, fvgs, order_blocks, pools, atr, min_rr)
         mts = evaluate_turtle_soup(symbol, current_price, bias, sweeps, displacements, pools, atr, min_rr)
@@ -206,7 +223,7 @@ def analyze_symbol(
             sc = float({PO3State.CONFIRMED: 87, PO3State.DISTRIBUTION: 73, PO3State.MANIPULATION: 60, PO3State.ACCUMULATION: 40}.get(s.state, 30))
             consider(d, sc, {PO3State.CONFIRMED.value, PO3State.DISTRIBUTION.value, PO3State.MANIPULATION.value})
 
-        notes: List[str] = []
+        notes: List[str] = [htf_note]
         status: Literal["NO_SETUP", "DEVELOPING", "CONFIRMED", "INVALIDATED"] = "NO_SETUP"
         if any(d.get("state") == "CONFIRMED" or d.get("setup_status") == "CONFIRMED" for d in scored):
             if news.blocking:
