@@ -200,9 +200,13 @@ def get_provider(name: str = "auto") -> BaseDataProvider:
         from .twelve_data import TwelveDataProvider
         return TwelveDataProvider()
     if name == "auto":
-        if os.getenv("TWELVE_DATA_API_KEY"):
+        if os.getenv("TWELVE_DATA_API_KEY", "").strip():
             from .twelve_data import TwelveDataProvider
             logger.info("Using Twelve Data provider (API key present)")
             return TwelveDataProvider()
+        from .yahoo import YahooFinanceProvider
+        logger.info("Using Yahoo Finance public chart data; synthetic fallback disabled")
+        return YahooFinanceProvider()
+    if name == "dukascopy":
         return DukascopyHistoricalProvider()
     return DukascopyHistoricalProvider()
