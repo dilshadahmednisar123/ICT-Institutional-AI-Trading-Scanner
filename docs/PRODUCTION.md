@@ -6,7 +6,10 @@
 - **Backend:** FastAPI Python function on Vercel.
 - **History:** private Vercel Blob store. Each scan writes an immutable JSON snapshot under `signals/`; the history endpoint lists and reads those snapshots.
 - **Automation:** GitHub Actions cron on the repository default branch (`main`) every 20 minutes. It calls the production scan endpoint, checks that persistence succeeded, and reads history back. Vercel's in-process APScheduler is not the production cron mechanism.
-- **Data:** Yahoo Finance public chart adapter by default; Twelve Data is optional when its key is configured. Synthetic candles are not used for production auto scans.
+- **Data:** the auto adapter prefers Twelve Data when a key is configured and falls back to Yahoo Finance when Twelve Data is unavailable or stale. Synthetic candles are never a production fallback.
+- **Gold feed identity:** Twelve Data's XAU/USD instrument is labelled as a spot reference (not broker-specific); Yahoo's XAUUSD mapping is GC=F COMEX gold futures and is explicitly labelled as a futures proxy, never as spot.
+- **Feed quality:** candle timestamps are UTC; validation checks OHLC integrity, duplicates, intraday missing bars, feed age and weekend closure. Stale/invalid candles block setup generation. The feed provider and last candle timestamp are returned in each OHLC quality report.
+- **Freshness caveat:** public Yahoo data is not a guaranteed low-latency execution feed. Treat the scanner as analysis-only and verify broker quotes before any trade. A fresh quote from a third-party reference feed is not a guarantee of executable broker pricing.
 
 ## Production URLs
 
