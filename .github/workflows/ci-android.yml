@@ -1,4 +1,4 @@
-name: Liquidity Nexus CI & Android APK
+name: Liquidity Nexus CI & Android Release
 on:
   push:
     branches: [main]
@@ -42,9 +42,38 @@ jobs:
           assert instruments.json()["total"] >= 20
           print("Backend API smoke tests passed")
           PY
+      - name: Production market-data and persistent-history acceptance test
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          BASE="https://liquidity-nexus-api-agus-902e.vercel.app"
+          for attempt in $(seq 1 24); do
+            if curl --fail --silent --show-error --max-time 20 "$BASE/health" -o health.json; then break; fi
+            sleep 10
+          done
+          python -c "import json; d=json.load(open('health.json')); assert d, d"
+          for symbol in EURUSD XAUUSD; do
+            curl --fail --silent --show-error --retry 3 --max-time 40 "$BASE/api/v1/ohlc/$symbol" -o "$symbol.json"
+            python -c "import json,sys; d=json.load(open(sys.argv[1])); assert d, d; print(sys.argv[1], 'market payload received')" "$symbol.json"
+          done
+          persisted=0
+          for attempt in $(seq 1 12); do
+            code=$(curl --location --post301 --post302 --post303 --silent --show-error --max-time 120 \
+              --write-out "%{http_code}" -X POST "$BASE/api/v1/scan" \
+              -H "Content-Type: application/json" \
+              -d '{"symbols":["EURUSD"],"timeframe":"15M"}' -o scan.json || true)
+            if [ "$code" = "200" ] && python -c "import json; d=json.load(open('scan.json')); assert d.get('persistence',{}).get('stored') is True" 2>/dev/null; then
+              persisted=1
+              break
+            fi
+            sleep 15
+          done
+          test "$persisted" = "1" || { cat scan.json || true; echo "Production scan did not persist"; exit 1; }
+          curl --fail --silent --show-error --retry 3 --max-time 40 "$BASE/api/v1/signals?limit=1" -o history.json
+          python -c "import json; d=json.load(open('history.json')); assert d.get('count',0) >= 1, d; print('Production scan persistence and readback passed')"
   android:
     if: github.event_name != 'schedule'
-    name: Build Android debug APK
+    name: Build signed Android release APK
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -67,49 +96,69 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null
           "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
       - run: npm install
-      - name: Build static web app
+      - name: Build production web app for Android
         env:
           NEXT_PUBLIC_API_URL: https://liquidity-nexus-api-agus-902e.vercel.app
         run: npm run build
       - run: npx cap add android
       - run: npx cap sync android
-      - name: Build debug APK
-        run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - name: Build Android release variant
+        run: cd android && chmod +x gradlew && ./gradlew assembleRelease
+      - name: Align and sign release APK
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$UNSIGNED"
+          STORE_PASSWORD="$(openssl rand -hex 24)"
+          KEY_PASSWORD="$(openssl rand -hex 24)"
+          keytool -genkeypair -v -keystore "$RUNNER_TEMP/liquidity-nexus-release.jks" \
+            -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" -alias liquidity-nexus \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=LIQUIDITY NEXUS, OU=Android, O=LIQUIDITY NEXUS, L=Aluva, ST=Kerala, C=IN"
+          "$BUILD_TOOLS/zipalign" -f -v 4 "$UNSIGNED" "$RUNNER_TEMP/liquidity-nexus-aligned.apk"
+          "$BUILD_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/liquidity-nexus-release.jks" \
+            --ks-key-alias liquidity-nexus --ks-pass "pass:$STORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" --out "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk" \
+            "$RUNNER_TEMP/liquidity-nexus-aligned.apk"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk"
+          "$BUILD_TOOLS/zipalign" -c -v 4 "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk"
+          sha256sum "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: liquidity-nexus-debug-apk
-          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          name: liquidity-nexus-release-apk
+          path: ${{ runner.temp }}/LIQUIDITY-NEXUS-release.apk
           if-no-files-found: error
           retention-days: 30
-      - name: Publish APK to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: frontend/android/app/build/outputs/apk/debug/app-debug.apk
-          generate_release_notes: true
-      - name: Publish latest APK for direct download
+      - name: Publish signed APK to GitHub Release
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-latest
-          name: LIQUIDITY NEXUS Android APK (latest)
+          name: LIQUIDITY NEXUS Android Release APK
           target_commitish: main
           prerelease: true
           overwrite_files: true
-          files: frontend/android/app/build/outputs/apk/debug/app-debug.apk
-
+          files: ${{ runner.temp }}/LIQUIDITY-NEXUS-release.apk
   scheduled-scan:
     name: Scheduled live market scan
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger production ICT scan
+      - name: Trigger and verify production ICT scan persistence
         run: |
+          set -euo pipefail
+          BASE="https://liquidity-nexus-api-agus-902e.vercel.app"
           curl --fail --silent --show-error --retry 3 --retry-delay 10 --max-time 120 \
-            -X POST "https://liquidity-nexus-api-agus-902e.vercel.app/api/v1/scan" \
+            -X POST "$BASE/api/v1/scan" \
             -H "Content-Type: application/json" \
             -d '{"symbols":["EURUSD","GBPUSD","USDJPY","XAUUSD","AUDUSD","USDCAD"],"timeframe":"15M"}' \
             -o scan-results.json
+          python -c "import json; d=json.load(open('scan-results.json')); assert d.get('persistence',{}).get('stored') is True, d.get('persistence'); print('Scheduled scan persisted:', d.get('scanned'))"
+          curl --fail --silent --show-error --retry 3 --max-time 40 "$BASE/api/v1/signals?limit=1" -o history.json
+          python -c "import json; d=json.load(open('history.json')); assert d.get('count',0) >= 1, d; print('Scheduled scan history readback passed')"
           cat scan-results.json
       - uses: actions/upload-artifact@v4
         with:
