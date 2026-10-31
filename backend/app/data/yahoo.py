@@ -17,7 +17,7 @@ class YahooFinanceProvider(BaseDataProvider):
     SYMBOLS = {
         "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "JPY=X",
         "USDCHF": "CHF=X", "USDCAD": "CAD=X", "AUDUSD": "AUDUSD=X",
-        "NZDUSD": "NZDUSD=X", "XAUUSD": "XAUUSD=X", "XAGUSD": "XAGUSD=X",
+        "NZDUSD": "NZDUSD=X", "XAUUSD": "GC=F", "XAGUSD": "XAGUSD=X",
         "EURJPY": "EURJPY=X", "GBPJPY": "GBPJPY=X", "EURGBP": "EURGBP=X",
         "AUDJPY": "AUDJPY=X", "CADJPY": "CADJPY=X", "CHFJPY": "CHFJPY=X",
         "NZDJPY": "NZDJPY=X", "GBPCHF": "GBPCHF=X", "EURCHF": "EURCHF=X",
