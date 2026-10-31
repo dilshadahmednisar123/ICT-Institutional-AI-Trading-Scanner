@@ -44,10 +44,14 @@ class YahooFinanceProvider(BaseDataProvider):
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
         params = {"range": period, "interval": interval, "includePrePost": "true", "events": "div,splits"}
-        if start and end:
+        if start or end:
             params.pop("range", None)
-            params["period1"] = str(int(start.replace(tzinfo=timezone.utc).timestamp()))
-            params["period2"] = str(int(end.replace(tzinfo=timezone.utc).timestamp()))
+            if start:
+                start_utc = start.replace(tzinfo=timezone.utc) if start.tzinfo is None else start.astimezone(timezone.utc)
+                params["period1"] = str(int(start_utc.timestamp()))
+            if end:
+                end_utc = end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
+                params["period2"] = str(int(end_utc.timestamp()))
         try:
             response = httpx.get(url, params=params, timeout=15.0, headers={
                 "User-Agent": "Mozilla/5.0 (compatible; LiquidityNexus/1.0)"
@@ -80,7 +84,9 @@ class YahooFinanceProvider(BaseDataProvider):
                       .dropna().reset_index())
             result_df = df.tail(limit).reset_index(drop=True)
             if symbol == "XAUUSD":
-                result_df.attrs["provider"] = "YahooFinanceProvider (GC=F gold futures proxy)"
+                result_df.attrs["provider"] = "YahooFinanceProvider (GC=F gold futures proxy; not spot XAUUSD)"
+            else:
+                result_df.attrs["provider"] = f"YahooFinanceProvider ({ticker})"
             return result_df
         except Exception as exc:
             logger.warning("Yahoo Finance fetch failed for %s (%s): %s", symbol, ticker, exc)
