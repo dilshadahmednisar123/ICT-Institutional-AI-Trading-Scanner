@@ -1,8 +1,7 @@
 """
 Core Analysis Pipeline
 
-Runs the deterministic ICT engines in sequence and produces a structured result
-including ICT 2022 model evaluation and confluence scoring.
+Runs deterministic ICT engines + ICT 2022 + Silver Bullet models + scoring.
 """
 
 from __future__ import annotations
@@ -19,7 +18,9 @@ from .displacement import detect_displacement, compute_atr
 from .premium_discount import build_dealing_range
 from .order_blocks import detect_order_blocks, get_active_order_blocks
 from .models.ict_2022 import evaluate_ict_2022, ModelState
+from .models.silver_bullet import evaluate_silver_bullet, SBState
 from .scoring import score_setup
+from .sessions import get_current_sessions, session_score, is_in_silver_bullet_window, active_session_names
 
 logger = logging.getLogger("ict_scanner.pipeline")
 
@@ -35,6 +36,8 @@ class AnalysisResult:
     dealing_range: Optional[Dict[str, Any]]
     premium_discount: Optional[str]
     swings_count: int
+    sessions: List[str] = field(default_factory=list)
+    in_silver_bullet_window: bool = False
     fvgs: List[Dict[str, Any]] = field(default_factory=list)
     active_fvgs: List[Dict[str, Any]] = field(default_factory=list)
     liquidity_pools: List[Dict[str, Any]] = field(default_factory=list)
@@ -57,7 +60,8 @@ def analyze_symbol(
     min_rr: float = 2.0,
 ) -> AnalysisResult:
     provider = provider or get_provider("dukascopy")
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
 
     try:
         df = provider.get_ohlc(symbol, timeframe, limit=limit)
@@ -67,7 +71,7 @@ def analyze_symbol(
             return AnalysisResult(
                 symbol=symbol,
                 timeframe=timeframe,
-                timestamp_utc=now,
+                timestamp_utc=now_iso,
                 data_quality=asdict(quality),
                 current_price=None,
                 bias="unknown",
@@ -81,7 +85,12 @@ def analyze_symbol(
 
         current_price = float(df.iloc[-1]["close"])
 
-        # --- Core engines ---
+        # Sessions
+        sessions = active_session_names(now)
+        in_sb, sb_label = is_in_silver_bullet_window(now)
+        sess_score = session_score(now)
+
+        # Core engines
         swings = find_swing_points(df, left=3, right=3, strength="short")
         structure = classify_structure(swings)
         bos_events = detect_bos_choch(df, swings, timeframe=timeframe)
@@ -102,8 +111,8 @@ def analyze_symbol(
         order_blocks = detect_order_blocks(df, displacements=displacements, timeframe=timeframe)
         active_obs = get_active_order_blocks(order_blocks, current_price)
 
-        # --- ICT 2022 Model ---
-        model_setups = evaluate_ict_2022(
+        # Models
+        ict2022 = evaluate_ict_2022(
             symbol=symbol,
             current_price=current_price,
             htf_bias=structure.get("bias", "neutral"),
@@ -118,13 +127,26 @@ def analyze_symbol(
             min_rr=min_rr,
         )
 
-        # Score each setup
-        scored_setups = []
+        silver = evaluate_silver_bullet(
+            symbol=symbol,
+            current_price=current_price,
+            htf_bias=structure.get("bias", "neutral"),
+            sweeps=sweeps,
+            displacements=displacements,
+            fvgs=fvgs,
+            liquidity_pools=pools,
+            atr=atr,
+            min_rr=min_rr,
+            now=now,
+        )
+
+        # Score ICT 2022 setups
+        scored: List[Dict[str, Any]] = []
         best = None
         best_score = -1.0
 
-        for s in model_setups:
-            breakdown = score_setup(s, has_mss=bool(bos_events))
+        for s in ict2022:
+            breakdown = score_setup(s, has_mss=bool(bos_events), session_score=sess_score)
             s.score = breakdown.total
             s.notes.extend(breakdown.notes)
             d = s.to_dict()
@@ -133,19 +155,32 @@ def analyze_symbol(
                 "classification": breakdown.classification,
                 "components": breakdown.components,
             }
-            scored_setups.append(d)
-            if breakdown.total > best_score and s.state != ModelState.IDLE:
+            scored.append(d)
+            if breakdown.total > best_score and s.state not in (ModelState.IDLE, ModelState.INVALIDATED):
                 best_score = breakdown.total
                 best = d
 
-        # Determine overall status
+        for s in silver:
+            if s.state == SBState.OUTSIDE_WINDOW:
+                continue
+            # Simple score boost inside SB window
+            d = s.to_dict()
+            d["score"] = min(100.0, (s.score or 50) + sess_score * 4)
+            scored.append(d)
+            if d["score"] > best_score and s.state in (SBState.CONFIRMED, SBState.ENTRY_READY, SBState.FVG_READY):
+                best_score = d["score"]
+                best = d
+
+        # Overall status
         status: Literal["NO_SETUP", "DEVELOPING", "CONFIRMED", "INVALIDATED"] = "NO_SETUP"
         notes: List[str] = []
 
-        confirmed = [s for s in model_setups if s.state == ModelState.CONFIRMED]
+        confirmed = [
+            s for s in ict2022 if s.state == ModelState.CONFIRMED
+        ] + [s for s in silver if s.state == SBState.CONFIRMED]
         developing = [
             s
-            for s in model_setups
+            for s in ict2022
             if s.state
             in (
                 ModelState.ENTRY_ZONE_READY,
@@ -153,16 +188,23 @@ def analyze_symbol(
                 ModelState.DISPLACEMENT,
                 ModelState.SWEEP_OCCURRED,
             )
+        ] + [
+            s
+            for s in silver
+            if s.state in (SBState.ENTRY_READY, SBState.FVG_READY, SBState.DISPLACEMENT, SBState.SWEEP)
         ]
 
         if confirmed:
             status = "CONFIRMED"
-            notes.append(f"{len(confirmed)} CONFIRMED ICT 2022 setup(s)")
+            notes.append(f"{len(confirmed)} CONFIRMED setup(s)")
         elif developing:
             status = "DEVELOPING"
-            notes.append(f"{len(developing)} developing setup(s) — not yet executable")
+            notes.append(f"{len(developing)} developing setup(s) — not executable")
         else:
-            notes.append("No qualifying ICT 2022 sequence — NO TRADE")
+            notes.append("No qualifying ICT sequence — NO TRADE")
+
+        if in_sb:
+            notes.append(f"Inside Silver Bullet window: {sb_label}")
 
         def ser_fvg(f):
             return {
@@ -172,7 +214,6 @@ def analyze_symbol(
                 "midpoint": f.midpoint,
                 "width": f.width,
                 "mitigated_pct": f.mitigated_pct,
-                "is_filled": f.is_filled,
             }
 
         def ser_pool(p):
@@ -181,7 +222,6 @@ def analyze_symbol(
                 "side": p.side,
                 "kind": p.kind,
                 "strength": p.strength,
-                "touches": p.touches,
                 "swept": p.swept,
             }
 
@@ -194,13 +234,12 @@ def analyze_symbol(
                 "quality": o.quality,
                 "invalidated": o.invalidated,
                 "is_breaker": o.is_breaker,
-                "mitigation_pct": o.mitigation_pct,
             }
 
         return AnalysisResult(
             symbol=symbol,
             timeframe=timeframe,
-            timestamp_utc=now,
+            timestamp_utc=now_iso,
             data_quality=asdict(quality),
             current_price=current_price,
             bias=structure.get("bias", "neutral"),
@@ -214,6 +253,8 @@ def analyze_symbol(
             else None,
             premium_discount=pd_class,
             swings_count=len(swings),
+            sessions=sessions,
+            in_silver_bullet_window=in_sb,
             fvgs=[ser_fvg(f) for f in fvgs[-6:]],
             active_fvgs=[ser_fvg(f) for f in active[:4]],
             liquidity_pools=[ser_pool(p) for p in pools[:10]],
@@ -223,7 +264,6 @@ def analyze_symbol(
                     "classification": s.classification,
                     "sweep_price": s.sweep_price,
                     "pool_price": s.pool.price,
-                    "pool_kind": s.pool.kind,
                 }
                 for s in sweeps[-5:]
             ],
@@ -232,7 +272,6 @@ def analyze_symbol(
                     "direction": d.direction,
                     "quality_score": d.quality_score,
                     "body_to_range": round(d.body_to_range, 3),
-                    "atr_multiple": round(d.atr_multiple, 2),
                 }
                 for d in displacements[-5:]
             ],
@@ -242,11 +281,10 @@ def analyze_symbol(
                     "type": e.event_type,
                     "direction": e.direction,
                     "price": e.price,
-                    "broken_level": e.broken_level,
                 }
                 for e in bos_events[-5:]
             ],
-            model_setups=scored_setups,
+            model_setups=scored,
             best_setup=best,
             setup_status=status,
             notes=notes,
@@ -257,7 +295,7 @@ def analyze_symbol(
         return AnalysisResult(
             symbol=symbol,
             timeframe=timeframe,
-            timestamp_utc=now,
+            timestamp_utc=now_iso,
             data_quality={},
             current_price=None,
             bias="unknown",
