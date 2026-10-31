@@ -119,7 +119,7 @@ def evaluate_silver_bullet(
     fvgs: List[FairValueGap],
     liquidity_pools: List[LiquidityPool],
     atr: Optional[float] = None,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
     now: Optional[datetime] = None,
 ) -> List[SilverBulletSetup]:
     results: List[SilverBulletSetup] = []
