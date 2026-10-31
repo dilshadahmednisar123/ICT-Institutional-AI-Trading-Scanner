@@ -1,21 +1,29 @@
 """
-ICT Backtesting Engine (MVP skeleton)
+ICT Backtesting Engine
 
-Walks historical candles, runs the analysis pipeline logic on closed bars only,
-and records hypothetical outcomes with conservative same-candle SL/TP ambiguity.
+Walk-forward style MVP:
+- Uses only closed historical bars (no lookahead in outcome simulation)
+- Conservative same-candle SL/TP ambiguity → SL wins
+- Samples analysis windows along history for research (not a claim of edge)
 
-This is intentionally conservative and does not claim profitability.
+Does not claim profitability.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Dict, Any, Literal
-from datetime import datetime, timezone
 import logging
 import pandas as pd
 
 from ..data.provider import get_provider
-from .pipeline import analyze_symbol
+from .structure import find_swing_points, classify_structure
+from .fvg import detect_fvgs, get_active_fvgs
+from .liquidity import build_liquidity_map, detect_sweeps
+from .displacement import detect_displacement, compute_atr
+from .premium_discount import build_dealing_range
+from .order_blocks import detect_order_blocks
+from .models.ict_2022 import evaluate_ict_2022, ModelState
+from .entry_risk import build_trade_levels, choose_entry_from_fvg
 
 logger = logging.getLogger("ict_scanner.backtest")
 
@@ -33,6 +41,7 @@ class BacktestTrade:
     exit_price: Optional[float] = None
     result: Optional[Literal["TP", "SL", "EXPIRED", "OPEN"]] = "OPEN"
     r_multiple: float = 0.0
+    bar_index: int = 0
 
 
 @dataclass
@@ -43,8 +52,10 @@ class BacktestReport:
     total: int = 0
     wins: int = 0
     losses: int = 0
+    expired: int = 0
     win_rate: float = 0.0
     net_r: float = 0.0
+    avg_r: float = 0.0
     profit_factor: float = 0.0
     max_consecutive_losses: int = 0
     notes: List[str] = field(default_factory=list)
@@ -56,12 +67,14 @@ class BacktestReport:
             "total": self.total,
             "wins": self.wins,
             "losses": self.losses,
-            "win_rate": self.win_rate,
-            "net_r": self.net_r,
-            "profit_factor": self.profit_factor,
+            "expired": self.expired,
+            "win_rate": round(self.win_rate, 2),
+            "net_r": round(self.net_r, 3),
+            "avg_r": round(self.avg_r, 3),
+            "profit_factor": round(self.profit_factor, 3),
             "max_consecutive_losses": self.max_consecutive_losses,
             "notes": self.notes,
-            "trades": [asdict(t) for t in self.trades[-50:]],  # last 50
+            "trades": [asdict(t) for t in self.trades[-100:]],
         }
 
 
@@ -74,10 +87,6 @@ def _simulate_outcome(
     tp: float,
     max_bars: int = 96,
 ) -> tuple[str, float, int]:
-    """
-    Conservative simulation:
-    If both SL and TP are touched in the same candle, count as SL (worst case).
-    """
     for i in range(start_idx + 1, min(start_idx + 1 + max_bars, len(df))):
         row = df.iloc[i]
         high, low = float(row["high"]), float(row["low"])
@@ -99,70 +108,135 @@ def _simulate_outcome(
                 return "SL", stop, i
             if hit_tp:
                 return "TP", tp, i
-    return "EXPIRED", float(df.iloc[min(start_idx + max_bars, len(df) - 1)]["close"]), min(start_idx + max_bars, len(df) - 1)
+    last = min(start_idx + max_bars, len(df) - 1)
+    return "EXPIRED", float(df.iloc[last]["close"]), last
+
+
+def _window_setup(
+    symbol: str,
+    window: pd.DataFrame,
+    min_rr: float = 2.0,
+) -> Optional[BacktestTrade]:
+    """Run lightweight ICT 2022 path on a closed window; return trade if CONFIRMED-like."""
+    if len(window) < 80:
+        return None
+
+    current_price = float(window.iloc[-1]["close"])
+    swings = find_swing_points(window, left=3, right=3)
+    structure = classify_structure(swings)
+    bias = structure.get("bias", "neutral")
+    dealing = build_dealing_range(swings)
+    pd_class = dealing.classify(current_price) if dealing else None
+    fvgs = detect_fvgs(window, timeframe="BT")
+    pools = build_liquidity_map(window, swings, timeframe="BT")
+    sweeps = detect_sweeps(window, pools)
+    displacements = detect_displacement(window)
+    atr_series = compute_atr(window)
+    atr = float(atr_series.iloc[-1]) if len(atr_series) else None
+    order_blocks = detect_order_blocks(window, displacements=displacements, timeframe="BT")
+
+    setups = evaluate_ict_2022(
+        symbol=symbol,
+        current_price=current_price,
+        htf_bias=bias,
+        sweeps=sweeps,
+        displacements=displacements,
+        fvgs=fvgs,
+        order_blocks=order_blocks,
+        liquidity_pools=pools,
+        dealing_range=dealing,
+        premium_discount=pd_class,
+        atr=atr,
+        min_rr=min_rr,
+    )
+
+    for s in setups:
+        if s.state == ModelState.CONFIRMED and s.levels and s.levels.valid:
+            ts = window.iloc[-1]["timestamp"]
+            return BacktestTrade(
+                symbol=symbol,
+                direction=s.direction,
+                model="ICT_2022_Mentorship",
+                entry=s.levels.entry_price,
+                stop=s.levels.stop_loss,
+                tp=float(s.levels.primary_tp or s.levels.take_profit_1 or s.levels.entry_price),
+                entry_time=str(ts),
+                bar_index=len(window) - 1,
+            )
+        # Also accept ENTRY_ZONE_READY with valid levels as research signal
+        if s.state == ModelState.ENTRY_ZONE_READY and s.levels and s.levels.valid:
+            ts = window.iloc[-1]["timestamp"]
+            return BacktestTrade(
+                symbol=symbol,
+                direction=s.direction,
+                model="ICT_2022_Mentorship",
+                entry=s.levels.entry_price,
+                stop=s.levels.stop_loss,
+                tp=float(s.levels.primary_tp or s.levels.take_profit_1 or s.levels.entry_price),
+                entry_time=str(ts),
+                bar_index=len(window) - 1,
+            )
+    return None
 
 
 def run_backtest(
     symbol: str,
     timeframe: str = "15M",
     limit: int = 500,
-    step: int = 5,
+    step: int = 20,
+    window_size: int = 200,
+    min_rr: float = 2.0,
 ) -> BacktestReport:
-    """
-    Simplified backtest:
-    - Re-runs full analyze_symbol at intervals (expensive but honest for MVP)
-    - Only takes CONFIRMED setups with valid levels
-    - Walks forward to resolve TP/SL
-
-    Production backtests should vectorize and freeze model state on closed bars only.
-    """
-    provider = get_provider()
+    provider = get_provider("auto")
     df = provider.get_ohlc(symbol, timeframe, limit=limit)
     report = BacktestReport(symbol=symbol, timeframe=timeframe)
-    report.notes.append("MVP backtest — conservative same-candle ambiguity rule (SL wins)")
-    report.notes.append("Does not claim profitability. For research only.")
+    report.notes.append("Walk-forward MVP on closed windows only")
+    report.notes.append("Same-candle SL+TP ambiguity → SL (conservative)")
+    report.notes.append("Research tool only — does not claim profitability")
 
-    if df is None or len(df) < 100:
-        report.notes.append("Insufficient data")
+    if df is None or len(df) < window_size + 10:
+        report.notes.append("Insufficient data for walk-forward")
         return report
 
-    # Sample every `step` bars near the end of history for speed
-    # Full production would walk every bar with incremental state
-    result = analyze_symbol(symbol, timeframe=timeframe, provider=provider, limit=limit)
-    if result.best_setup and result.best_setup.get("levels") and result.best_setup["levels"].get("valid"):
-        lv = result.best_setup["levels"]
-        direction = result.best_setup.get("direction", "BUY")
-        entry = float(lv["entry"])
-        stop = float(lv["stop_loss"])
-        tp = float(lv.get("primary_tp") or lv.get("tp2") or lv.get("tp1") or entry)
-        trade = BacktestTrade(
-            symbol=symbol,
-            direction=direction,
-            model=result.best_setup.get("model", "unknown"),
-            entry=entry,
-            stop=stop,
-            tp=tp,
-            entry_time=result.timestamp_utc,
+    df = df.reset_index(drop=True)
+    cooldown_until = 0
+
+    for end in range(window_size, len(df) - 5, step):
+        if end < cooldown_until:
+            continue
+        window = df.iloc[: end + 1].tail(window_size).copy()
+        trade = _window_setup(symbol, window, min_rr=min_rr)
+        if not trade:
+            continue
+
+        outcome, exit_px, exit_idx = _simulate_outcome(
+            df, end, trade.direction, trade.entry, trade.stop, trade.tp
         )
-        # Resolve on remaining synthetic path from last bar (illustrative only)
-        outcome, exit_px, _ = _simulate_outcome(df, len(df) - 2, direction, entry, stop, tp)
         trade.result = outcome  # type: ignore
         trade.exit_price = exit_px
-        risk = abs(entry - stop) or 1e-9
+        trade.exit_time = str(df.iloc[exit_idx]["timestamp"])
+        risk = abs(trade.entry - trade.stop) or 1e-9
         if outcome == "TP":
-            trade.r_multiple = abs(tp - entry) / risk
+            trade.r_multiple = abs(trade.tp - trade.entry) / risk
         elif outcome == "SL":
             trade.r_multiple = -1.0
         else:
-            trade.r_multiple = (exit_px - entry) / risk if direction == "BUY" else (entry - exit_px) / risk
-        report.trades.append(trade)
+            if trade.direction == "BUY":
+                trade.r_multiple = (exit_px - trade.entry) / risk
+            else:
+                trade.r_multiple = (trade.entry - exit_px) / risk
 
-    # Aggregate
+        report.trades.append(trade)
+        cooldown_until = exit_idx + 1  # no overlapping trades in MVP
+
     report.total = len(report.trades)
     report.wins = sum(1 for t in report.trades if t.result == "TP")
     report.losses = sum(1 for t in report.trades if t.result == "SL")
-    report.win_rate = (report.wins / report.total * 100) if report.total else 0.0
+    report.expired = sum(1 for t in report.trades if t.result == "EXPIRED")
+    decided = report.wins + report.losses
+    report.win_rate = (report.wins / decided * 100) if decided else 0.0
     report.net_r = sum(t.r_multiple for t in report.trades)
+    report.avg_r = (report.net_r / report.total) if report.total else 0.0
     gross_win = sum(t.r_multiple for t in report.trades if t.r_multiple > 0)
     gross_loss = abs(sum(t.r_multiple for t in report.trades if t.r_multiple < 0))
     report.profit_factor = (gross_win / gross_loss) if gross_loss > 0 else 0.0
@@ -175,5 +249,4 @@ def run_backtest(
         else:
             consec = 0
     report.max_consecutive_losses = max_c
-
     return report
