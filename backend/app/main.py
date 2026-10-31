@@ -14,6 +14,7 @@ from .engines.pipeline import analyze_symbol, run_multi_symbol_scan
 from .engines.backtest import run_backtest
 from .data.provider import get_provider
 from .core.auth import require_api_key, api_key_enabled
+from .storage.signal_store import save_scan_results, get_recent_signals, storage_health
 from .scheduler.scanner import (
     start_scheduler, stop_scheduler, pause_scheduler,
     resume_scheduler, get_scheduler_status, trigger_manual_scan,
@@ -205,6 +206,7 @@ def trigger_scan(req: ScanRequest, _: None = Depends(require_api_key)):
             "error": r.error,
         })
 
+    persistence = save_scan_results(serialized)
     confirmed = [s for s in serialized if s["setup_status"] == "CONFIRMED"]
     developing = [s for s in serialized if s["setup_status"] == "DEVELOPING"]
 
@@ -217,6 +219,7 @@ def trigger_scan(req: ScanRequest, _: None = Depends(require_api_key)):
         "developing": len(developing),
         "no_setup": len(serialized) - len(confirmed) - len(developing),
         "results": serialized,
+        "persistence": persistence,
         "message": "Analysis complete. Only CONFIRMED setups with valid RR are actionable (signal-only).",
     }
 
@@ -231,8 +234,14 @@ def analyze_one(
 
 
 @app.get("/api/v1/signals")
-def get_signals(status: Optional[str] = None, _: None = Depends(require_api_key)):
-    return {"signals": [], "count": 0, "message": "No persistent signal store yet."}
+def get_signals(status: Optional[str] = None, limit: int = Query(100, ge=1, le=500), _: None = Depends(require_api_key)):
+    signals = get_recent_signals(limit=limit, status=status)
+    return {"signals": signals, "count": len(signals), "storage": "Vercel Blob (private)" if os.getenv("BLOB_READ_WRITE_TOKEN") else "unconfigured"}
+
+
+@app.get("/api/v1/storage/health")
+def persistent_storage_health():
+    return storage_health()
 
 
 @app.get("/api/v1/status")
