@@ -95,6 +95,15 @@ def analyze_symbol(
                 dealing_range=None, premium_discount=None, swings_count=0,
                 setup_status="NO_SETUP", notes=["DATA UNAVAILABLE or invalid"], error=quality.message,
             )
+        if quality.stale:
+            return AnalysisResult(
+                symbol=symbol, timeframe=timeframe, timestamp_utc=now_iso,
+                data_quality=asdict(quality), current_price=float(df.iloc[-1]["close"]),
+                bias="unknown", dealing_range=None, premium_discount=None, swings_count=0,
+                setup_status="NO_SETUP",
+                notes=["DATA STALE — no trade signals are generated from stale candles"],
+                error="Market data is stale; wait for a fresh provider update.",
+            )
 
         current_price = float(df.iloc[-1]["close"])
         sessions = active_session_names(now)
