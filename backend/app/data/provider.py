@@ -116,8 +116,8 @@ class BaseDataProvider(ABC):
         expected = TF_MINUTES.get(tf, 15)
         misaligned_count = 0
         if tf in ("1M", "5M", "15M", "30M", "1H", "4H"):
-            epoch_seconds = work["timestamp"].astype("int64") // 1_000_000_000
-            misaligned_count = int((epoch_seconds % (expected * 60) != 0).sum())
+            aligned = work["timestamp"].dt.floor(f"{expected}min")
+            misaligned_count = int((work["timestamp"] != aligned).sum())
         if misaligned_count:
             return DataQualityReport(
                 symbol, timeframe, False, misaligned_candles=misaligned_count,
