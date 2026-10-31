@@ -13,7 +13,7 @@ import logging
 import pandas as pd
 import httpx
 
-from .provider import BaseDataProvider, DataQualityReport, SyntheticDataProvider
+from .provider import BaseDataProvider
 
 logger = logging.getLogger("ict_scanner.twelve")
 
@@ -34,7 +34,6 @@ class TwelveDataProvider(BaseDataProvider):
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("TWELVE_DATA_API_KEY", "")
-        self._fallback = SyntheticDataProvider(seed=99)
 
     def get_ohlc(
         self,
@@ -80,7 +79,13 @@ class TwelveDataProvider(BaseDataProvider):
                     "close": float(v["close"]),
                     "volume": float(v.get("volume") or 0),
                 })
-            return pd.DataFrame(rows)
+            frame = pd.DataFrame(rows)
+            frame.attrs["provider"] = (
+                "TwelveDataProvider (XAU/USD spot reference; not broker-specific)"
+                if symbol.upper() == "XAUUSD"
+                else "TwelveDataProvider"
+            )
+            return frame
         except Exception as exc:
             logger.exception("Twelve Data fetch failed: %s", exc)
             return pd.DataFrame()
