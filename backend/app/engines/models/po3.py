@@ -110,7 +110,7 @@ def evaluate_po3(
     displacements: List[DisplacementEvent],
     liquidity_pools: List[LiquidityPool],
     atr: Optional[float] = None,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
 ) -> List[PO3Setup]:
     results: List[PO3Setup] = []
     ts = datetime.now(timezone.utc).isoformat()
