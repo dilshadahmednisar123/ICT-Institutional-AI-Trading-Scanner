@@ -65,7 +65,7 @@ jobs:
       - run: npm install
       - name: Build static web app
         env:
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_API_URL: https://liquidity-nexus-api-agus-902e.vercel.app
         run: npm run build
       - run: npx cap add android
       - run: npx cap sync android
