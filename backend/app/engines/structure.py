@@ -18,6 +18,7 @@ class SwingPoint:
     strength: Literal["short", "intermediate", "long"] = "short"
     index: int = -1
     confirmed: bool = True
+    confirmation_index: int = -1
 
 
 @dataclass
@@ -62,6 +63,7 @@ def find_swing_points(
                     strength=strength,
                     index=i,
                     confirmed=True,
+                    confirmation_index=i + right,
                 )
             )
         # Swing Low
@@ -144,12 +146,15 @@ def detect_bos_choch(
 
     times = pd.to_datetime(df["timestamp"]) if "timestamp" in df.columns else df.index
     ordered = sorted(swings, key=lambda swing: swing.index)
-    active_bias = classify_structure(ordered).get("bias", "neutral")
+    active_bias = "neutral"
     broken_high_indices: set[int] = set()
     broken_low_indices: set[int] = set()
 
     for i in range(1, len(df)):
-        eligible = [s for s in ordered if s.index < i]
+        # A pivot is unavailable until its right-side confirmation candles have closed.
+        eligible = [s for s in ordered if s.confirmation_index < i]
+        if active_bias == "neutral":
+            active_bias = classify_structure(eligible).get("bias", "neutral")
         highs = [s for s in eligible if s.kind == "high"]
         lows = [s for s in eligible if s.kind == "low"]
         if not highs or not lows:
