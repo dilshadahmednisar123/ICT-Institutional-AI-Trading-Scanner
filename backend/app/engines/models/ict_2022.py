@@ -152,15 +152,15 @@ def evaluate_ict_2022(
         )
 
         # 1. HTF Bias
-        if htf_bias != bias_needed and htf_bias != "neutral":
-            # Allow neutral but lower score later; strict mode would reject
-            setup.notes.append(f"HTF bias is {htf_bias}, preferred {bias_needed}")
-        else:
-            setup.state = ModelState.HTF_BIAS_OK
-            setup.notes.append(f"HTF bias aligned or neutral ({htf_bias})")
+        if htf_bias != bias_needed:
+            setup.notes.append(f"HTF bias {htf_bias} is not aligned with required {bias_needed}")
+            results.append(setup)
+            continue
+        setup.state = ModelState.HTF_BIAS_OK
+        setup.notes.append(f"HTF bias aligned ({htf_bias})")
 
         # 2+3. Liquidity sweep of correct side
-        relevant_sweeps = [s for s in sweeps if s.side == sweep_side and s.reclaim_confirmed]
+        relevant_sweeps = [s for s in sweeps if s.side == sweep_side and s.reclaim_confirmed and s.time is not None]
         if not relevant_sweeps:
             setup.notes.append("No confirmed liquidity sweep of required side")
             results.append(setup)
@@ -171,7 +171,10 @@ def evaluate_ict_2022(
         setup.notes.append(f"Confirmed {sweep_side} liquidity sweep @ {setup.sweep.sweep_price}")
 
         # 4. Displacement
-        relevant_disp = [d for d in displacements if d.direction == disp_dir and d.quality_score >= 55]
+        relevant_disp = [
+            d for d in displacements
+            if d.direction == disp_dir and d.quality_score >= 55 and d.time >= setup.sweep.time
+        ]
         if not relevant_disp:
             setup.notes.append("No qualifying displacement after sweep")
             results.append(setup)
@@ -186,6 +189,7 @@ def evaluate_ict_2022(
             event for event in (structure_events or [])
             if event.direction == disp_dir
             and event.event_type in ("BOS", "CHOCH", "MSS")
+            and event.confirmed_by_close
             and event.time >= setup.sweep.time
             and event.time >= setup.displacement.time
         ]
@@ -200,7 +204,10 @@ def evaluate_ict_2022(
             setup.order_block = matching_obs[-1]
 
         # 5. Prefer also having an FVG created by the move
-        active = get_active_fvgs(fvgs, current_price, direction=fvg_dir)
+        active = [
+            fvg for fvg in get_active_fvgs(fvgs, current_price, direction=fvg_dir)
+            if fvg.formation_time >= setup.displacement.time
+        ]
         if not active:
             setup.notes.append("No active FVG in the required direction")
             results.append(setup)
