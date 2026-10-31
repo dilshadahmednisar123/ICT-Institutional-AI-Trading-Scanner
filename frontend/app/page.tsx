@@ -200,7 +200,7 @@ export default function Dashboard() {
       </div>
 
       <div className="text-xs text-institutional-muted text-center pt-4">
-        Backend: {API_BASE}. Set TWELVE_DATA_API_KEY for live data. Click a row for chart + overlays.
+        Backend: {API_BASE}. Live feed: Yahoo Finance (Twelve Data optional). Stale or unavailable data never produces trade signals.
       </div>
     </div>
   );
