@@ -7,7 +7,7 @@ import logging
 import httpx
 import pandas as pd
 
-from .provider import BaseDataProvider
+from .provider import BaseDataProvider, only_closed_candles
 
 logger = logging.getLogger("ict_scanner.data.yahoo")
 
@@ -82,7 +82,7 @@ class YahooFinanceProvider(BaseDataProvider):
                 df = (df.set_index("timestamp")
                       .resample("1D").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"})
                       .dropna().reset_index())
-            result_df = df.tail(limit).reset_index(drop=True)
+            result_df = only_closed_candles(df, timeframe).tail(limit).reset_index(drop=True)
             if symbol == "XAUUSD":
                 result_df.attrs["provider"] = "YahooFinanceProvider (GC=F gold futures proxy; not spot XAUUSD)"
             else:
