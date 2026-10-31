@@ -26,6 +26,7 @@ type ScanResult = {
     gaps_detected?: number;
     missing_candles?: number;
     duplicate_candles?: number;
+    misaligned_candles?: number;
     message?: string;
   };
   notes?: string[];
@@ -165,7 +166,7 @@ export default function Dashboard() {
           <div className="card">
             <div className="text-xs text-institutional-muted mb-1">DATA INTEGRITY</div>
             <div className="text-sm font-medium">Gaps {selectedResult.data_quality.gaps_detected ?? 0} · Missing {selectedResult.data_quality.missing_candles ?? 0}</div>
-            <div className="text-xs text-institutional-muted mt-1">Duplicates {selectedResult.data_quality.duplicate_candles ?? 0}</div>
+            <div className="text-xs text-institutional-muted mt-1">Duplicates {selectedResult.data_quality.duplicate_candles ?? 0} · Misaligned {selectedResult.data_quality.misaligned_candles ?? 0}</div>
           </div>
         </div>
       )}
