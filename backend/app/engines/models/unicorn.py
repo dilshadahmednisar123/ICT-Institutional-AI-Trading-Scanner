@@ -126,7 +126,7 @@ def evaluate_unicorn(
     order_blocks: List[OrderBlock],
     liquidity_pools: List[LiquidityPool],
     atr: Optional[float] = None,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
 ) -> List[UnicornSetup]:
     results: List[UnicornSetup] = []
     ts = datetime.now(timezone.utc).isoformat()
