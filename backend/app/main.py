@@ -12,6 +12,14 @@ import logging
 
 from .engines.pipeline import analyze_symbol, run_multi_symbol_scan
 from .data.provider import get_provider
+from .scheduler.scanner import (
+    start_scheduler,
+    stop_scheduler,
+    pause_scheduler,
+    resume_scheduler,
+    get_scheduler_status,
+    trigger_manual_scan,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ict_scanner")
@@ -19,7 +27,7 @@ logger = logging.getLogger("ict_scanner")
 app = FastAPI(
     title="ICT Institutional AI Trading Scanner",
     description="Signal-only ICT scanner. Selective. NO TRADE is preferred when conditions fail.",
-    version="0.3.0-models",
+    version="0.4.0-sessions-scheduler",
 )
 
 app.add_middleware(
@@ -49,18 +57,24 @@ class ScanRequest(BaseModel):
     force: bool = False
 
 
+class SchedulerConfig(BaseModel):
+    interval_minutes: int = 20
+    symbols: Optional[List[str]] = None
+    timeframe: str = "15M"
+
+
 @app.get("/")
 def root():
     return {
         "name": "ICT Institutional AI Trading Scanner",
-        "version": "0.3.0-models",
+        "version": "0.4.0-sessions-scheduler",
         "mode": "SIGNAL_ONLY",
         "philosophy": "NO VALID SETUP = NO TRADE",
         "docs": "/docs",
         "engines": [
             "structure", "fvg", "liquidity", "displacement",
             "premium_discount", "order_blocks", "entry_risk",
-            "scoring", "ict_2022_model", "pipeline",
+            "scoring", "sessions", "ict_2022", "silver_bullet", "pipeline",
         ],
     }
 
@@ -70,7 +84,7 @@ def health():
     return HealthResponse(
         status="ok",
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
-        version="0.3.0-models",
+        version="0.4.0-sessions-scheduler",
     )
 
 
@@ -109,6 +123,8 @@ def trigger_scan(req: ScanRequest):
             "current_price": r.current_price,
             "bias": r.bias,
             "premium_discount": r.premium_discount,
+            "sessions": r.sessions,
+            "in_silver_bullet_window": r.in_silver_bullet_window,
             "setup_status": r.setup_status,
             "best_setup": r.best_setup,
             "model_setups": r.model_setups,
@@ -129,7 +145,7 @@ def trigger_scan(req: ScanRequest):
     return {
         "status": "completed",
         "mode": "SIGNAL_ONLY",
-        "version": "0.3.0-models",
+        "version": "0.4.0-sessions-scheduler",
         "scanned": len(serialized),
         "confirmed": len(confirmed),
         "developing": len(developing),
@@ -142,7 +158,7 @@ def trigger_scan(req: ScanRequest):
 @app.get("/api/v1/analyze/{symbol}")
 def analyze_one(
     symbol: str,
-    timeframe: str = Query("15M", description="Timeframe e.g. 5M, 15M, 1H, 4H"),
+    timeframe: str = Query("15M"),
 ):
     result = analyze_symbol(symbol.upper(), timeframe=timeframe)
     return asdict(result)
@@ -153,25 +169,65 @@ def get_signals(status: Optional[str] = None):
     return {
         "signals": [],
         "count": 0,
-        "message": "No persistent signal store yet. Run /api/v1/scan for live analysis.",
+        "message": "No persistent signal store yet. Use /api/v1/scan or scheduler.",
     }
 
 
 @app.get("/api/v1/status")
 def system_status():
+    sched = get_scheduler_status()
     return {
-        "scheduler": "manual_only_in_current_version",
-        "last_scan": None,
-        "next_scan": None,
-        "data_feed": "dukascopy_historical_placeholder + synthetic_fallback",
         "mode": "SIGNAL_ONLY",
-        "version": "0.3.0-models",
+        "version": "0.4.0-sessions-scheduler",
+        "data_feed": "dukascopy_historical_placeholder + synthetic_fallback",
+        "scheduler": sched,
         "engines_ready": [
             "structure", "fvg", "liquidity", "displacement",
             "premium_discount", "order_blocks", "entry_risk",
-            "scoring", "ict_2022_model", "pipeline",
+            "scoring", "sessions", "ict_2022", "silver_bullet", "pipeline",
         ],
     }
+
+
+# ---------- Scheduler controls ----------
+
+@app.post("/api/v1/scheduler/start")
+def scheduler_start(cfg: SchedulerConfig = SchedulerConfig()):
+    start_scheduler(
+        interval_minutes=cfg.interval_minutes,
+        symbols=cfg.symbols or DEFAULT_SYMBOLS,
+        timeframe=cfg.timeframe,
+    )
+    return {"status": "started", **get_scheduler_status()}
+
+
+@app.post("/api/v1/scheduler/stop")
+def scheduler_stop():
+    stop_scheduler()
+    return {"status": "stopped", **get_scheduler_status()}
+
+
+@app.post("/api/v1/scheduler/pause")
+def scheduler_pause():
+    pause_scheduler()
+    return {"status": "paused", **get_scheduler_status()}
+
+
+@app.post("/api/v1/scheduler/resume")
+def scheduler_resume():
+    resume_scheduler()
+    return {"status": "resumed", **get_scheduler_status()}
+
+
+@app.get("/api/v1/scheduler/status")
+def scheduler_status():
+    return get_scheduler_status()
+
+
+@app.post("/api/v1/scheduler/trigger")
+def scheduler_trigger(req: ScanRequest = ScanRequest()):
+    results = trigger_manual_scan(symbols=req.symbols, timeframe=req.timeframe)
+    return {"status": "triggered", "results": results, **get_scheduler_status()}
 
 
 if __name__ == "__main__":
