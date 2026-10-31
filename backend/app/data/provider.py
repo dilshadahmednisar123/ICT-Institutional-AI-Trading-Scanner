@@ -115,7 +115,12 @@ class BaseDataProvider(ABC):
         stale = age_minutes > FRESHNESS_MINUTES.get(tf, 150)
         provider = str(df.attrs.get("provider", provider_name))
         message = "OK" if not stale else f"Feed stale: latest candle closed {age_minutes:.0f} minutes ago"
-        market_status = "stale" if stale else "open_or_recent"
+        weekend_closed = (now.weekday() == 5 or
+                          (now.weekday() == 6 and now.hour < 22) or
+                          (now.weekday() == 4 and now.hour >= 22))
+        market_status = "market_closed" if weekend_closed else ("stale" if stale else "open_or_recent")
+        if weekend_closed:
+            message = f"Market closed for weekend; last candle closed {age_minutes:.0f} minutes ago"
         return DataQualityReport(
             symbol=symbol, timeframe=timeframe, is_valid=True,
             missing_candles=missing, duplicate_candles=duplicate_count,
@@ -182,21 +187,21 @@ class AutoDataProvider(BaseDataProvider):
                 frame = self.twelve.get_ohlc(symbol, timeframe, start, end, limit)
                 if frame is not None and not frame.empty:
                     report = self.twelve.validate(frame, symbol, timeframe)
-                    candidates.append((0 if not report.stale else 1, -report.last_timestamp.timestamp(), frame))
+                    candidates.append((0 if not report.stale else 1, 0, -report.last_timestamp.timestamp(), frame))
             except Exception as exc:
                 logger.warning("Twelve Data failed for %s; trying Yahoo fallback: %s", symbol, exc)
         try:
             frame = self.yahoo.get_ohlc(symbol, timeframe, start, end, limit)
             if frame is not None and not frame.empty:
                 report = self.yahoo.validate(frame, symbol, timeframe)
-                candidates.append((0 if not report.stale else 1, -report.last_timestamp.timestamp(), frame))
+                candidates.append((0 if not report.stale else 1, 1, -report.last_timestamp.timestamp(), frame))
         except Exception as exc:
             logger.warning("Yahoo Finance failed for %s: %s", symbol, exc)
         if not candidates:
             return pd.DataFrame(columns=OHLC_COLUMNS)
         # Fresh beats stale; among equal freshness choose the newest candle.
-        candidates.sort(key=lambda item: (item[0], item[1]))
-        return candidates[0][2].tail(limit).reset_index(drop=True)
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        return candidates[0][3].tail(limit).reset_index(drop=True)
 
     def get_latest_price(self, symbol: str) -> Optional[Dict[str, float]]:
         frame = self.get_ohlc(symbol, "5M", limit=2)
