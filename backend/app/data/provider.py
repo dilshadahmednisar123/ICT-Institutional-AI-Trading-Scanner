@@ -149,6 +149,9 @@ class BaseDataProvider(ABC):
         if tf in ("1M", "5M", "15M", "30M", "1H", "4H"):
             aligned = work["timestamp"].dt.floor(f"{expected}min")
             misaligned_count = int((work["timestamp"] != aligned).sum())
+        elif tf == "1D":
+            aligned = work["timestamp"].dt.floor("1D")
+            misaligned_count = int((work["timestamp"] != aligned).sum())
         if misaligned_count:
             return DataQualityReport(
                 symbol, timeframe, False, misaligned_candles=misaligned_count,
