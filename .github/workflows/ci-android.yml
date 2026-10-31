@@ -52,30 +52,36 @@ jobs:
           PY
       - name: Market-data quality and ICT engine unit tests
         run: python -m pytest -q tests/test_market_data_and_ict.py
-      - name: Walk-forward backtest on real historical market candles
+      - name: Walk-forward backtest on licensed historical market candles
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
         run: |
           python - <<'PY'
-          import json
+          import json, os
+          if not os.getenv("TWELVE_DATA_API_KEY"):
+              result = {
+                  "status": "SKIPPED",
+                  "reason": "TWELVE_DATA_API_KEY is not configured in GitHub Actions; Yahoo data is not used for trading backtests.",
+              }
+              with open("historical-backtest.json", "w") as f:
+                  json.dump(result, f, indent=2)
+              print(result)
+              raise SystemExit(0)
           from app.engines.backtest import run_backtest
           reports = []
           for symbol in ("EURUSD", "XAUUSD"):
-              report = run_backtest(symbol, timeframe="15M", limit=500, step=20, window_size=200)
+              report = run_backtest(symbol, timeframe="15M", limit=2000, step=20, window_size=200)
               payload = report.to_dict()
               assert payload["bars_used"] >= 210, payload
               assert payload["period_start"] and payload["period_end"], payload
               assert payload["data_provider"] not in ("unavailable", "SyntheticDataProvider"), payload
               reports.append(payload)
               print(json.dumps({
-                  "symbol": symbol,
-                  "provider": payload["data_provider"],
-                  "bars": payload["bars_used"],
-                  "period_start": payload["period_start"],
-                  "period_end": payload["period_end"],
-                  "trades": payload["total"],
-                  "wins": payload["wins"],
-                  "losses": payload["losses"],
-                  "win_rate": payload["win_rate"],
-                  "net_r": payload["net_r"],
+                  "symbol": symbol, "provider": payload["data_provider"],
+                  "bars": payload["bars_used"], "period_start": payload["period_start"],
+                  "period_end": payload["period_end"], "trades": payload["total"],
+                  "wins": payload["wins"], "losses": payload["losses"],
+                  "win_rate": payload["win_rate"], "net_r": payload["net_r"],
                   "profit_factor": payload["profit_factor"],
               }, sort_keys=True))
           with open("historical-backtest.json", "w") as f:
@@ -109,10 +115,16 @@ jobs:
           import json,sys
           d=json.load(open(sys.argv[1]))
           assert d.get("symbol") == sys.argv[2], d
-          assert len(d.get("candles",[])) >= 10, (sys.argv[2], d.get("quality"))
           q=d.get("quality",{})
-          assert q.get("provider") and q.get("last_timestamp"), q
-          print(sys.argv[2], "candles:", len(d["candles"]), "stale:", q.get("stale"), "provider:", q.get("provider"))
+          assert q.get("provider"), q
+          if d.get("candles"):
+              assert len(d["candles"]) >= 10, (sys.argv[2], q)
+              assert q.get("last_timestamp"), q
+              print(sys.argv[2], "candles:", len(d["candles"]), "stale:", q.get("stale"), "provider:", q.get("provider"))
+          else:
+              assert not q.get("is_valid"), q
+              assert q.get("market_status") == "unavailable", q
+              print(sys.argv[2], "has no licensed feed; no candles/signals permitted:", q.get("message"))
           PY
           done
           curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/signals?limit=500" -o history-before.json
