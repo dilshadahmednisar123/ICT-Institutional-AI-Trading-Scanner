@@ -8,6 +8,7 @@ from app.data.provider import (
     BaseDataProvider,
     DukascopyHistoricalProvider,
     SyntheticDataProvider,
+    only_closed_candles,
 )
 from app.engines.structure import SwingPoint, detect_bos_choch
 from app.engines.liquidity import LiquidityPool, detect_equal_levels, detect_sweeps
@@ -148,6 +149,18 @@ def test_structural_stop_and_opposing_liquidity_target_rr():
     assert levels.stop_loss < levels.entry_price < levels.primary_tp
     assert levels.risk_reward > 0
 
+
+
+
+def test_forming_candle_is_excluded_from_confirmed_analysis():
+    now = datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc)
+    frame = pd.DataFrame([
+        candle(now - timedelta(minutes=15), 1.1, 1.101, 1.099, 1.1),
+        candle(now, 1.1, 1.102, 1.099, 1.101),
+    ])
+    closed = only_closed_candles(frame, "15M", now=now)
+    assert len(closed) == 1
+    assert closed.iloc[-1]["timestamp"] == now - timedelta(minutes=15)
 
 
 def test_timeframe_misaligned_candles_are_rejected():
