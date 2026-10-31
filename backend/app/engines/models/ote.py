@@ -98,7 +98,7 @@ def evaluate_ote(
     fvgs: List[FairValueGap],
     liquidity_pools: List[LiquidityPool],
     atr: Optional[float] = None,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
 ) -> List[OTESetup]:
     results: List[OTESetup] = []
     ts = datetime.now(timezone.utc).isoformat()
