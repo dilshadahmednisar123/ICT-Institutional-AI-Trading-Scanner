@@ -237,7 +237,7 @@ export default function Dashboard() {
       </div>
 
       <div className="text-xs text-institutional-muted text-center pt-4">
-        Backend: {API_BASE}. Auto feed: Twelve Data preferred when configured, Yahoo Finance fallback. XAUUSD may be a GC=F futures proxy, not spot. Stale or unavailable data never produces trade signals.
+        Backend: {API_BASE}. Licensed feed: Twelve Data only (TWELVE_DATA_API_KEY required; commodity entitlement required for XAU/USD spot). Yahoo and synthetic trading feeds are disabled. Unavailable or stale data never produces trade signals.
       </div>
     </div>
   );
