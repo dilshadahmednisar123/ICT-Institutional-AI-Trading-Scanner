@@ -23,7 +23,7 @@ services:
       - key: TWELVE_DATA_API_KEY
         sync: false
       - key: API_SECRET_KEY
-        generateValue: true
+        sync: false
   - type: redis
     name: liquidity-nexus-redis
     plan: starter
