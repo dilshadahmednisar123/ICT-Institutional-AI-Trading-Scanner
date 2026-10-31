@@ -14,8 +14,9 @@ Signal-only ICT scanner for Forex and Gold. **NO VALID SETUP = NO TRADE**.
 - Backend: FastAPI deployed as a Vercel Python function.
 - History: private Vercel Blob snapshots; scans are written as immutable JSON objects and read back by the history endpoint.
 - Automation: GitHub Actions scheduled workflow on `main`, every 20 minutes, invokes production scan and verifies persistence. The in-process APScheduler is not relied on for Vercel serverless scheduling.
-- Market data: Yahoo Finance public chart feed by default; Twelve Data is optional when configured. Synthetic candles are not used for production scans.
-- Gold: XAUUSD uses Yahoo `GC=F` gold-futures data as a proxy, not a broker-specific spot feed.
+- Market data: authenticated Twelve Data only. Configure `TWELVE_DATA_API_KEY`; without it the API returns DATA UNAVAILABLE and no setups. Yahoo Finance is disabled for trading use; synthetic candles are test-only.
+- Gold: XAU/USD is accepted only from a Twelve Data account with commodity-data entitlement. No GC=F futures proxy is substituted for spot XAUUSD.
+- Candle validation: closed bars only, UTC timeframe alignment, duplicate/gap detection, stale-feed blocking, and complete lower-to-higher timeframe resampling.
 - Android: Capacitor wrapper. The release workflow requires a persistent Android signing keystore configured as GitHub Actions secrets; see `docs/ANDROID_RELEASE_SIGNING.md`.
 
 ## ICT modules
