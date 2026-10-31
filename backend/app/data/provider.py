@@ -2,9 +2,9 @@
 Market Data Provider Layer
 
 Philosophy:
-- Never invent prices.
-- Historical data via free Dukascopy-compatible sources.
-- Live data requires user-supplied API keys.
+- Never invent prices for live decisions.
+- Historical path prepared for Dukascopy libraries.
+- Optional Twelve Data when TWELVE_DATA_API_KEY is set.
 - Clear DATA UNAVAILABLE states.
 """
 
@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 import logging
+import os
 import pandas as pd
 import numpy as np
 
@@ -57,7 +58,6 @@ class BaseDataProvider(ABC):
         end: Optional[datetime] = None,
         limit: int = 500,
     ) -> pd.DataFrame:
-        """Return DataFrame with columns: timestamp, open, high, low, close, volume"""
         ...
 
     @abstractmethod
@@ -71,6 +71,7 @@ class BaseDataProvider(ABC):
                 timeframe=timeframe,
                 is_valid=False,
                 message="Empty or None dataframe",
+                provider=self.__class__.__name__,
             )
 
         required = {"timestamp", "open", "high", "low", "close"}
@@ -80,32 +81,27 @@ class BaseDataProvider(ABC):
                 timeframe=timeframe,
                 is_valid=False,
                 message=f"Missing columns. Have: {list(df.columns)}",
+                provider=self.__class__.__name__,
             )
 
         df = df.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         df = df.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last")
 
-        missing = 0
         gaps = 0
-        # Simple gap heuristic (not perfect for all TFs)
         if len(df) > 2:
             diffs = df["timestamp"].diff().dropna()
-            # This is a rough check; production should use expected delta per TF
             median_diff = diffs.median()
-            large_gaps = (diffs > median_diff * 3).sum()
-            gaps = int(large_gaps)
+            gaps = int((diffs > median_diff * 3).sum())
 
         last_ts = df["timestamp"].iloc[-1].to_pydatetime()
         now = datetime.now(timezone.utc)
-        stale = (now - last_ts) > timedelta(hours=6)  # adjustable
+        stale = (now - last_ts) > timedelta(hours=6)
 
         return DataQualityReport(
             symbol=symbol,
             timeframe=timeframe,
             is_valid=True,
-            missing_candles=missing,
-            duplicate_candles=0,
             gaps_detected=gaps,
             stale=stale,
             last_timestamp=last_ts,
@@ -115,10 +111,7 @@ class BaseDataProvider(ABC):
 
 
 class SyntheticDataProvider(BaseDataProvider):
-    """
-    Deterministic synthetic provider for unit tests and offline development.
-    Produces realistic-looking random-walk candles. NEVER used in production signals.
-    """
+    """Deterministic synthetic provider for offline tests only."""
 
     def __init__(self, seed: int = 42):
         self.rng = np.random.default_rng(seed)
@@ -131,32 +124,28 @@ class SyntheticDataProvider(BaseDataProvider):
         end: Optional[datetime] = None,
         limit: int = 500,
     ) -> pd.DataFrame:
-        logger.warning("Using SYNTHETIC data provider — for testing only")
-        base_price = 1.1000 if "USD" in symbol and symbol.startswith("EUR") else 2000.0 if "XAU" in symbol else 1.2500
-
+        logger.warning("Using SYNTHETIC data provider — for testing / offline only")
+        base_price = 1.1000 if symbol.upper().startswith("EUR") else 2000.0 if "XAU" in symbol.upper() else 1.2500
         now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         rows = []
         price = base_price
         for i in range(limit, 0, -1):
             ts = now - timedelta(minutes=i * self._tf_minutes(timeframe))
-            change = self.rng.normal(0, 0.0008 if "XAU" not in symbol else 1.5)
+            change = self.rng.normal(0, 0.0008 if "XAU" not in symbol.upper() else 1.5)
             o = price
             c = price + change
             h = max(o, c) + abs(self.rng.normal(0, 0.0003))
             l = min(o, c) - abs(self.rng.normal(0, 0.0003))
             v = float(self.rng.integers(100, 2000))
-            rows.append(
-                {
-                    "timestamp": ts,
-                    "open": round(o, 5),
-                    "high": round(h, 5),
-                    "low": round(l, 5),
-                    "close": round(c, 5),
-                    "volume": v,
-                }
-            )
+            rows.append({
+                "timestamp": ts,
+                "open": round(o, 5),
+                "high": round(h, 5),
+                "low": round(l, 5),
+                "close": round(c, 5),
+                "volume": v,
+            })
             price = c
-
         return pd.DataFrame(rows)
 
     def get_latest_price(self, symbol: str) -> Optional[Dict[str, float]]:
@@ -168,31 +157,14 @@ class SyntheticDataProvider(BaseDataProvider):
 
     @staticmethod
     def _tf_minutes(tf: str) -> int:
-        mapping = {
-            "1M": 1,
-            "5M": 5,
-            "15M": 15,
-            "30M": 30,
-            "1H": 60,
-            "4H": 240,
-            "1D": 1440,
-            "1W": 10080,
-        }
-        return mapping.get(tf.upper(), 15)
+        return {"1M": 1, "5M": 5, "15M": 15, "30M": 30, "1H": 60, "4H": 240, "1D": 1440}.get(tf.upper(), 15)
 
 
 class DukascopyHistoricalProvider(BaseDataProvider):
     """
-    Placeholder for real Dukascopy historical access.
-
-    In production you should use one of:
-    - dukascopy-python (pip install dukascopy-python)
-    - dukascopy-node
-    - Tomas Charvat Dukascopy_downloader
-
-    This class currently falls back to Synthetic so the rest of the pipeline
-    can be developed and tested offline. Replace the body of get_ohlc with
-    real library calls once the package is installed in the environment.
+    Placeholder for dukascopy-python / downloader integration.
+    Falls back to synthetic for offline pipeline development.
+    Install dukascopy-python and replace get_ohlc body for real historical data.
     """
 
     def __init__(self):
@@ -206,20 +178,31 @@ class DukascopyHistoricalProvider(BaseDataProvider):
         end: Optional[datetime] = None,
         limit: int = 500,
     ) -> pd.DataFrame:
-        logger.info(
-            "DukascopyHistoricalProvider: real library not wired yet — using controlled synthetic for pipeline development"
-        )
-        # TODO: replace with real dukascopy-python / downloader call
-        # Example pattern once installed:
-        # from dukascopy_python import fetch_candles, instruments, TimeUnit, OfferSide
+        # Attempt real library if installed
+        try:
+            import dukascopy_python as duka  # type: ignore
+            logger.info("dukascopy_python detected — wire fetch_candles here for production")
+            # Real wiring left to operator; fall through until configured
+        except ImportError:
+            pass
+        logger.info("DukascopyHistoricalProvider: using controlled synthetic for offline development")
         return self._fallback.get_ohlc(symbol, timeframe, start, end, limit)
 
     def get_latest_price(self, symbol: str) -> Optional[Dict[str, float]]:
         return self._fallback.get_latest_price(symbol)
 
 
-def get_provider(name: str = "dukascopy") -> BaseDataProvider:
-    name = name.lower()
+def get_provider(name: str = "auto") -> BaseDataProvider:
+    name = (name or "auto").lower()
     if name in ("synthetic", "test"):
         return SyntheticDataProvider()
+    if name in ("twelve", "twelvedata", "twelve_data"):
+        from .twelve_data import TwelveDataProvider
+        return TwelveDataProvider()
+    if name == "auto":
+        if os.getenv("TWELVE_DATA_API_KEY"):
+            from .twelve_data import TwelveDataProvider
+            logger.info("Using Twelve Data provider (API key present)")
+            return TwelveDataProvider()
+        return DukascopyHistoricalProvider()
     return DukascopyHistoricalProvider()
