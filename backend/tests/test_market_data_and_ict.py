@@ -9,6 +9,7 @@ from app.data.provider import (
     BaseDataProvider,
     DukascopyHistoricalProvider,
     SyntheticDataProvider,
+    get_provider,
     only_closed_candles,
     resample_ohlc,
 )
@@ -66,9 +67,23 @@ def test_invalid_ohlc_is_rejected():
     assert report.market_status == "invalid"
 
 
-def test_production_auto_provider_never_selects_synthetic():
-    assert isinstance(AutoDataProvider(), BaseDataProvider)
-    assert not isinstance(AutoDataProvider(), SyntheticDataProvider)
+def test_production_auto_provider_never_selects_synthetic(monkeypatch):
+    monkeypatch.delenv("TWELVE_DATA_API_KEY", raising=False)
+    provider = AutoDataProvider()
+    assert isinstance(provider, BaseDataProvider)
+    assert not isinstance(provider, SyntheticDataProvider)
+    frame = provider.get_ohlc("EURUSD", "15M", limit=100)
+    report = provider.validate(frame, "EURUSD", "15M")
+    assert frame.empty
+    assert not report.is_valid
+    assert "TWELVE_DATA_API_KEY" in report.message
+
+
+def test_yahoo_provider_is_disabled_for_trading_use():
+    provider = get_provider("yahoo")
+    frame = provider.get_ohlc("EURUSD", "15M", limit=100)
+    assert frame.empty
+    assert "not intended for trading" in frame.attrs["error"]
 
 
 def test_unimplemented_dukascopy_returns_unavailable_not_synthetic():
