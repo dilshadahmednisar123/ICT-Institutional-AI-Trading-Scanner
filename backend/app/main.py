@@ -9,6 +9,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from dataclasses import asdict
 import logging
+import os
 
 from .engines.pipeline import analyze_symbol, run_multi_symbol_scan
 from .engines.backtest import run_backtest
