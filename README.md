@@ -4,60 +4,52 @@
 **NO TRADE** when conditions fail.
 
 **Repo:** https://github.com/dilshadahmednisar123/ICT-Institutional-AI-Trading-Scanner  
-**Version:** `0.7.0-po3-smt-backtest`
+**Version:** `0.8.0-live-overlays`
 
 ## Models
 
-| Model | Status |
-|-------|--------|
-| ICT 2022 Mentorship | ✅ |
-| Silver Bullet | ✅ |
-| Unicorn | ✅ |
-| Turtle Soup | ✅ |
-| OTE | ✅ |
-| Judas Swing | ✅ |
-| **PO3 / AMD** | ✅ |
-| **SMT Divergence** | ✅ engine |
+2022 · Silver Bullet · Unicorn · Turtle Soup · OTE · Judas · **PO3/AMD** · **SMT**
 
-## Engines
+## Highlights
 
-Structure · FVG · Liquidity · Displacement · Premium/Discount · Order Blocks · Entry/SL/TP · Scoring · Sessions · News Filter · **SMT** · **Backtest** · Scheduler · Pipeline
-
-## UI
-
-- Dark institutional Next.js dashboard  
-- **Lightweight Charts** candlestick chart (click symbol row to load)  
-- Capacitor path for Android APK (`docs/ANDROID_APK.md`)
+- Auto data provider: uses **Twelve Data** when `TWELVE_DATA_API_KEY` is set, otherwise Dukascopy placeholder / synthetic offline
+- Chart **Entry / SL / TP / EQ** price-line overlays
+- SMT divergence column on dashboard
+- Docker Compose for backend
+- Backtest endpoint + 20-min scheduler
+- Android APK path via Capacitor
 
 ## Quick Start
 
 ```bash
-# Backend
+# Optional live data
+export TWELVE_DATA_API_KEY=your_key
+
 cd backend && python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# Frontend
 cd frontend && npm install && npm run dev
 ```
 
+Or: `docker compose up backend`
+
 - UI http://localhost:3000  
 - API http://localhost:8000/docs  
-- OHLC `GET /api/v1/ohlc/EURUSD`  
-- Backtest `GET /api/v1/backtest/EURUSD?timeframe=15M`
+- Backtest `GET /api/v1/backtest/EURUSD`  
+- OHLC `GET /api/v1/ohlc/EURUSD`
 
 ## Philosophy
 
-Liquidity → Raid → Displacement → Structure → PD array → Structural entry → Invalidation stop → Liquidity TP → Min RR  
+Liquidity → Raid → Displacement → Structure → PD array → Structural entry → Invalidation stop → Liquidity TP  
 **NO VALID SETUP = NO TRADE**
 
-## Pending
+## Still optional / next
 
-- Wire real Dukascopy / Twelve Data (API keys)  
-- Chart overlays (FVG/OB/levels)  
-- Redis job store  
-- Full historical walk-forward backtest  
-- Auth + production deploy  
+- Redis job store for multi-worker scheduler  
+- Full walk-forward historical backtest  
+- Auth  
+- Production host + HTTPS  
 
 ## Disclaimer
 
