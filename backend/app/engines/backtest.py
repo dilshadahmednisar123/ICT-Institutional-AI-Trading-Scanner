@@ -160,23 +160,12 @@ def _window_setup(
         atr=atr,
         min_rr=min_rr,
         structure_events=structure_events,
+        current_bar_high=float(window.iloc[-1]["high"]),
+        current_bar_low=float(window.iloc[-1]["low"]),
     )
 
     for s in setups:
         if s.state == ModelState.CONFIRMED and s.levels and s.levels.valid:
-            ts = window.iloc[-1]["timestamp"]
-            return BacktestTrade(
-                symbol=symbol,
-                direction=s.direction,
-                model="ICT_2022_Mentorship",
-                entry=s.levels.entry_price,
-                stop=s.levels.stop_loss,
-                tp=float(s.levels.primary_tp or s.levels.take_profit_1 or s.levels.entry_price),
-                entry_time=str(ts),
-                bar_index=len(window) - 1,
-            )
-        # Also accept ENTRY_ZONE_READY with valid levels as research signal
-        if s.state == ModelState.ENTRY_ZONE_READY and s.levels and s.levels.valid:
             ts = window.iloc[-1]["timestamp"]
             return BacktestTrade(
                 symbol=symbol,
