@@ -50,12 +50,14 @@ def save_scan_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
     try:
         response = httpx.put(
-            f"{BLOB_API}/{pathname}",
+            BLOB_API,
+            params={"pathname": pathname},
             content=json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"),
             headers=headers,
             timeout=30.0,
         )
-        response.raise_for_status()
+        if response.is_error:
+            raise RuntimeError(f"Vercel Blob upload failed ({response.status_code}): {response.text[:500]}")
         blob = response.json()
         return {"stored": True, "pathname": blob.get("pathname", pathname), "url": blob.get("url")}
     except Exception as exc:
