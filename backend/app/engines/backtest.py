@@ -16,7 +16,7 @@ import logging
 import pandas as pd
 
 from ..data.provider import get_provider
-from .structure import find_swing_points, classify_structure
+from .structure import find_swing_points, classify_structure, detect_bos_choch
 from .fvg import detect_fvgs, get_active_fvgs
 from .liquidity import build_liquidity_map, detect_sweeps
 from .displacement import detect_displacement, compute_atr
@@ -126,6 +126,7 @@ def _window_setup(
     swings = find_swing_points(window, left=3, right=3)
     structure = classify_structure(swings)
     bias = structure.get("bias", "neutral")
+    structure_events = detect_bos_choch(window, swings, timeframe=timeframe)
     dealing = build_dealing_range(swings)
     pd_class = dealing.classify(current_price) if dealing else None
     fvgs = detect_fvgs(window, timeframe="BT")
@@ -149,6 +150,7 @@ def _window_setup(
         premium_discount=pd_class,
         atr=atr,
         min_rr=min_rr,
+        structure_events=structure_events,
     )
 
     for s in setups:
@@ -186,7 +188,7 @@ def run_backtest(
     limit: int = 500,
     step: int = 20,
     window_size: int = 200,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
 ) -> BacktestReport:
     provider = get_provider("auto")
     df = provider.get_ohlc(symbol, timeframe, limit=limit)
@@ -206,7 +208,7 @@ def run_backtest(
         if end < cooldown_until:
             continue
         window = df.iloc[: end + 1].tail(window_size).copy()
-        trade = _window_setup(symbol, window, min_rr=min_rr)
+        trade = _window_setup(symbol, window, min_rr=min_rr, timeframe=timeframe)
         if not trade:
             continue
 
