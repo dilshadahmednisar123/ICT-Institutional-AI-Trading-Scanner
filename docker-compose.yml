@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - TWELVE_DATA_API_KEY=${TWELVE_DATA_API_KEY:-}
+      - SCAN_INTERVAL_MINUTES=20
+      - ENABLE_SCHEDULER=true
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+
+  # Optional Redis for future persistent job store
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   restart: unless-stopped
+
+  # Frontend is typically run via `npm run dev` or deployed to Vercel.
+  # Uncomment if you add a frontend Dockerfile.
+  # frontend:
+  #   build: ./frontend
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - NEXT_PUBLIC_API_URL=http://localhost:8000
