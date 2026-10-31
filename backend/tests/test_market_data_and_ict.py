@@ -30,7 +30,8 @@ def candle(ts, o, h, l, c):
 
 
 def test_validator_counts_duplicates_and_intraday_missing_bars():
-    now = datetime.now(timezone.utc)
+    current = datetime.now(timezone.utc)
+    now = current.replace(minute=(current.minute // 15) * 15, second=0, microsecond=0)
     rows = [
         candle(now - timedelta(minutes=90), 1.1, 1.101, 1.099, 1.100),
         candle(now - timedelta(minutes=75), 1.1, 1.101, 1.099, 1.100),
