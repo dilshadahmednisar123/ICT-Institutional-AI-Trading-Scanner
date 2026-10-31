@@ -115,7 +115,7 @@ def _simulate_outcome(
 def _window_setup(
     symbol: str,
     window: pd.DataFrame,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
 ) -> Optional[BacktestTrade]:
     """Run lightweight ICT 2022 path on a closed window; return trade if CONFIRMED-like."""
     if len(window) < 80:
