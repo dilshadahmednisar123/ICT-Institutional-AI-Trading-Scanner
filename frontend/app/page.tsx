@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import PriceChart from "../components/PriceChart";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -15,6 +15,8 @@ type ScanResult = {
   news_risk?: string;
   setup_status: string;
   best_setup?: any;
+  chart_overlays?: any;
+  smt?: any;
   notes?: string[];
   error?: string;
 };
@@ -25,6 +27,31 @@ export default function Dashboard() {
   const [meta, setMeta] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState("EURUSD");
+
+  const selectedResult = useMemo(
+    () => results.find((r) => r.symbol === selected),
+    [results, selected]
+  );
+
+  const overlays = useMemo(() => {
+    if (selectedResult?.chart_overlays) return selectedResult.chart_overlays;
+    if (selectedResult?.best_setup?.levels) {
+      const lv = selectedResult.best_setup.levels;
+      return {
+        trade: {
+          entry: lv.entry,
+          stop: lv.stop_loss,
+          tp1: lv.tp1,
+          tp2: lv.tp2,
+          direction: selectedResult.best_setup.direction,
+        },
+        dealing_range: selectedResult.best_setup
+          ? undefined
+          : undefined,
+      };
+    }
+    return null;
+  }, [selectedResult]);
 
   async function runScan() {
     setLoading(true);
@@ -104,7 +131,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <PriceChart symbol={selected} timeframe="15M" />
+      <PriceChart symbol={selected} timeframe="15M" overlays={overlays} />
 
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
@@ -115,7 +142,7 @@ export default function Dashboard() {
               <th className="pb-3 pr-4">Bias</th>
               <th className="pb-3 pr-4">P/D</th>
               <th className="pb-3 pr-4">Session</th>
-              <th className="pb-3 pr-4">News</th>
+              <th className="pb-3 pr-4">SMT</th>
               <th className="pb-3 pr-4">Status</th>
               <th className="pb-3 pr-4">Model / Score</th>
               <th className="pb-3">Notes</th>
@@ -143,7 +170,9 @@ export default function Dashboard() {
                   {(r.sessions || []).join(", ") || "—"}
                   {r.in_silver_bullet_window && <span className="ml-1 text-blue-400">SB</span>}
                 </td>
-                <td className="py-3 pr-4 text-xs">{r.news_risk ?? "—"}</td>
+                <td className="py-3 pr-4 text-xs capitalize">
+                  {r.smt?.divergence || (r.smt?.available === false ? "n/a" : "—")}
+                </td>
                 <td className="py-3 pr-4">
                   <span className={statusBadge(r.setup_status)}>{r.setup_status}</span>
                 </td>
@@ -170,7 +199,7 @@ export default function Dashboard() {
       </div>
 
       <div className="text-xs text-institutional-muted text-center pt-4">
-        Backend: {API_BASE}. Click a row to load its chart. Data uses offline/synthetic fallback until live feeds are configured.
+        Backend: {API_BASE}. Set TWELVE_DATA_API_KEY for live data. Click a row for chart + overlays.
       </div>
     </div>
   );
