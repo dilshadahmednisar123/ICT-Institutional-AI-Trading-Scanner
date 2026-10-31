@@ -95,14 +95,21 @@ def analyze_symbol(
                 dealing_range=None, premium_discount=None, swings_count=0,
                 setup_status="NO_SETUP", notes=["DATA UNAVAILABLE or invalid"], error=quality.message,
             )
-        if quality.stale:
+        if quality.stale or quality.market_status == "market_closed":
+            market_closed = quality.market_status == "market_closed"
+            reason = (
+                "MARKET CLOSED — fresh validation unavailable; no trade signals are generated"
+                if market_closed
+                else "DATA STALE — no trade signals are generated from stale candles"
+            )
             return AnalysisResult(
                 symbol=symbol, timeframe=timeframe, timestamp_utc=now_iso,
                 data_quality=asdict(quality), current_price=float(df.iloc[-1]["close"]),
                 bias="unknown", dealing_range=None, premium_discount=None, swings_count=0,
                 setup_status="NO_SETUP",
-                notes=["DATA STALE — no trade signals are generated from stale candles"],
-                error="Market data is stale; wait for a fresh provider update.",
+                notes=[reason],
+                error="Market closed; wait for the next fresh provider update." if market_closed
+                else "Market data is stale; wait for a fresh provider update.",
             )
 
         current_price = float(df.iloc[-1]["close"])
@@ -144,7 +151,8 @@ def analyze_symbol(
         try:
             htf_df = provider.get_ohlc(symbol, htf_timeframe, limit=240)
             htf_quality = provider.validate(htf_df, symbol, htf_timeframe)
-            if htf_quality.is_valid and not htf_quality.stale and len(htf_df) >= 30:
+            if (htf_quality.is_valid and not htf_quality.stale
+                    and htf_quality.market_status != "market_closed" and len(htf_df) >= 30):
                 htf_swings = find_swing_points(htf_df, left=3, right=3, strength="intermediate")
                 htf_bias = classify_structure(htf_swings).get("bias", "neutral")
                 htf_note = f"HTF {htf_timeframe} bias: {htf_bias}"
