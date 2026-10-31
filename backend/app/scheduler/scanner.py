@@ -1,22 +1,22 @@
 """
-Persistent Scanner Scheduler (MVP)
+Persistent Scanner Scheduler
 
-Uses APScheduler with an in-memory job store for development.
-For production replace with SQLAlchemy/Redis job store so the schedule
-survives process restarts and can run on a dedicated worker.
+Default: APScheduler BackgroundScheduler (in-process).
+Optional Redis job store when REDIS_URL is set (multi-process friendly path).
 
 Default interval: 20 minutes.
 """
 
 from __future__ import annotations
 import logging
+import os
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from ..engines.pipeline import run_multi_symbol_scan, AnalysisResult
+from ..engines.pipeline import run_multi_symbol_scan
 from ..data.provider import get_provider
 
 logger = logging.getLogger("ict_scanner.scheduler")
@@ -33,6 +33,19 @@ _scan_count: int = 0
 _paused: bool = False
 
 
+def _build_scheduler() -> BackgroundScheduler:
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if redis_url:
+        try:
+            from apscheduler.jobstores.redis import RedisJobStore
+            jobstores = {"default": RedisJobStore.from_url(redis_url)}
+            logger.info("Using Redis job store: %s", redis_url.split("@")[-1])
+            return BackgroundScheduler(timezone="UTC", jobstores=jobstores)
+        except Exception as exc:
+            logger.warning("Redis job store unavailable (%s) — falling back to memory", exc)
+    return BackgroundScheduler(timezone="UTC")
+
+
 def _run_scan_job(symbols: Optional[List[str]] = None, timeframe: str = "15M") -> None:
     global _last_scan, _last_results, _scan_count
     if _paused:
@@ -42,7 +55,7 @@ def _run_scan_job(symbols: Optional[List[str]] = None, timeframe: str = "15M") -
     symbols = symbols or DEFAULT_SYMBOLS
     logger.info("Scheduled scan starting for %s", symbols)
     try:
-        provider = get_provider()
+        provider = get_provider("auto")
         results = run_multi_symbol_scan(symbols, timeframe=timeframe, provider=provider)
         _last_results = [
             {
@@ -58,12 +71,7 @@ def _run_scan_job(symbols: Optional[List[str]] = None, timeframe: str = "15M") -
         _last_scan = datetime.now(timezone.utc)
         _scan_count += 1
         confirmed = sum(1 for r in results if r.setup_status == "CONFIRMED")
-        logger.info(
-            "Scan #%s complete — %s symbols, %s confirmed",
-            _scan_count,
-            len(results),
-            confirmed,
-        )
+        logger.info("Scan #%s complete — %s symbols, %s confirmed", _scan_count, len(results), confirmed)
     except Exception:
         logger.exception("Scheduled scan failed")
 
@@ -78,7 +86,7 @@ def start_scheduler(
         logger.warning("Scheduler already running")
         return _scheduler
 
-    _scheduler = BackgroundScheduler(timezone="UTC")
+    _scheduler = _build_scheduler()
     _scheduler.add_job(
         _run_scan_job,
         trigger=IntervalTrigger(minutes=interval_minutes),
@@ -90,7 +98,6 @@ def start_scheduler(
     )
     _scheduler.start()
     logger.info("Scheduler started — every %s minutes", interval_minutes)
-    # Optional immediate first run
     _run_scan_job(symbols=symbols, timeframe=timeframe)
     return _scheduler
 
@@ -118,6 +125,9 @@ def resume_scheduler() -> None:
 def get_scheduler_status() -> Dict[str, Any]:
     next_run = None
     running = False
+    jobstore = "memory"
+    if os.getenv("REDIS_URL", "").strip():
+        jobstore = "redis"
     if _scheduler and _scheduler.running:
         running = True
         job = _scheduler.get_job("ict_scan")
@@ -127,6 +137,7 @@ def get_scheduler_status() -> Dict[str, Any]:
     return {
         "running": running,
         "paused": _paused,
+        "jobstore": jobstore,
         "scan_count": _scan_count,
         "last_scan_utc": _last_scan.isoformat() if _last_scan else None,
         "next_scan_utc": next_run,
