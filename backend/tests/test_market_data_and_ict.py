@@ -431,6 +431,40 @@ def test_ict_2022_confirms_only_full_chronological_sequence():
     assert buy.levels.primary_tp == 105.0
 
 
+
+def test_ict_2022_waits_until_entry_price_is_actually_traded():
+    dealing, sweep, displacement, fvg, structure, target = _ict_fixture()
+    setups = evaluate_ict_2022(
+        symbol="EURUSD", current_price=95.4, htf_bias="bullish",
+        sweeps=[sweep], displacements=[displacement], fvgs=[fvg],
+        order_blocks=[], liquidity_pools=[target], dealing_range=dealing,
+        premium_discount="discount", atr=0.5, structure_events=[structure],
+        current_bar_high=95.4, current_bar_low=95.1,
+    )
+    buy = next(s for s in setups if s.direction == "BUY")
+    assert buy.state == ModelState.ENTRY_ZONE_READY
+
+
+def test_ote_waits_when_705_entry_has_not_been_traded():
+    now = datetime.now(timezone.utc)
+    dealing = DealingRange(high=110.0, low=90.0, equilibrium=100.0,
+                           levels={0.0: 90.0, 0.5: 100.0, 1.0: 110.0})
+    pool = LiquidityPool(price=95.0, side="SSL", kind="swing_low", strength=80)
+    sweep = LiquiditySweep(
+        side="bullish", pool=pool, sweep_price=94.0,
+        reclaim_confirmed=True, classification="confirmed", time=now,
+    )
+    target = LiquidityPool(price=105.0, side="BSL", kind="equal_highs", strength=90)
+    setups = evaluate_ote(
+        symbol="EURUSD", current_price=96.3, htf_bias="bullish",
+        dealing_range=dealing, sweeps=[sweep], displacements=[], fvgs=[],
+        liquidity_pools=[target], atr=0.5,
+        current_bar_high=96.4, current_bar_low=96.1,
+    )
+    buy = next(s for s in setups if s.direction == "BUY")
+    assert buy.state == OTEState.IN_OTE_ZONE
+
+
 def test_ict_2022_rejects_unconfirmed_structure_and_pre_sweep_displacement():
     dealing, sweep, displacement, fvg, structure, target = _ict_fixture(event_confirmed=False)
     unconfirmed = evaluate_ict_2022(
