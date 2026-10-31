@@ -9,6 +9,7 @@ from app.data.provider import (
     DukascopyHistoricalProvider,
     SyntheticDataProvider,
     only_closed_candles,
+    resample_ohlc,
 )
 from app.engines.structure import SwingPoint, StructureEvent, detect_bos_choch, classify_structure, find_swing_points
 from app.engines.liquidity import LiquidityPool, LiquiditySweep, detect_equal_levels, detect_sweeps
@@ -156,6 +157,26 @@ def test_structural_stop_and_opposing_liquidity_target_rr():
     assert levels.risk_reward > 0
 
 
+
+
+
+def test_higher_timeframe_resample_uses_complete_aligned_groups_only():
+    start = datetime(2026, 10, 31, 0, 0, tzinfo=timezone.utc)
+    now = start + timedelta(hours=8)
+    rows = []
+    for i in range(33):
+        ts = start + timedelta(minutes=15 * i)
+        price = 1.0 + i * 0.0001
+        rows.append(candle(ts, price, price + 0.001, price - 0.001, price + 0.0005))
+        rows[-1]["volume"] = 10
+    frame = pd.DataFrame(rows)
+    frame.attrs["provider"] = "fixture-feed"
+    htf = resample_ohlc(frame, "15M", "4H", now=now)
+    assert len(htf) == 2
+    assert list(htf["timestamp"]) == [start, start + timedelta(hours=4)]
+    assert htf.iloc[0]["open"] == rows[0]["open"]
+    assert htf.iloc[0]["volume"] == 160
+    assert htf.attrs["provider"] == "fixture-feed"
 
 
 def test_forming_candle_is_excluded_from_confirmed_analysis():
