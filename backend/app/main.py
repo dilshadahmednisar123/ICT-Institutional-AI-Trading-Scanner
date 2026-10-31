@@ -33,7 +33,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -241,7 +241,7 @@ def system_status():
         "mode": "SIGNAL_ONLY",
         "version": VERSION,
         "auth_enabled": api_key_enabled(),
-        "data_feed": "auto (Twelve Data if TWELVE_DATA_API_KEY else Dukascopy/synthetic)",
+        "data_feed": "auto (Twelve Data when configured; otherwise Yahoo Finance; synthetic disabled)",
         "scheduler": get_scheduler_status(),
         "engines_ready": ENGINES,
     }
