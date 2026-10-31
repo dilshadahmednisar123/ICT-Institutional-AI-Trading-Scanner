@@ -13,6 +13,7 @@ permissions:
   actions: read
 jobs:
   backend:
+    if: github.event_name != 'schedule'
     name: Backend validation
     runs-on: ubuntu-latest
     defaults:
@@ -42,6 +43,7 @@ jobs:
           print("Backend API smoke tests passed")
           PY
   android:
+    if: github.event_name != 'schedule'
     name: Build Android debug APK
     runs-on: ubuntu-latest
     defaults:
