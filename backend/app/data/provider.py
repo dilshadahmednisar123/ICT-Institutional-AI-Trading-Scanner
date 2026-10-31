@@ -41,6 +41,35 @@ def only_closed_candles(df: pd.DataFrame, timeframe: str,
     return df.loc[closed_at <= current].copy().reset_index(drop=True)
 
 
+
+def resample_ohlc(df: pd.DataFrame, base_timeframe: str, target_timeframe: str,
+                  now: Optional[datetime] = None) -> pd.DataFrame:
+    """Build aligned higher-timeframe bars only from complete source-bar groups."""
+    base_minutes = TF_MINUTES.get(base_timeframe.upper())
+    target_minutes = TF_MINUTES.get(target_timeframe.upper())
+    if df is None or df.empty or not base_minutes or not target_minutes or target_minutes <= base_minutes:
+        return pd.DataFrame(columns=OHLC_COLUMNS)
+    ratio = target_minutes // base_minutes
+    if ratio < 2 or target_minutes % base_minutes:
+        return pd.DataFrame(columns=OHLC_COLUMNS)
+    work = df.copy()
+    work["timestamp"] = pd.to_datetime(work["timestamp"], utc=True, errors="coerce")
+    work = work.dropna(subset=["timestamp"]).sort_values("timestamp")
+    work = work.drop_duplicates(subset=["timestamp"], keep="last").set_index("timestamp")
+    rule = f"{target_minutes}min"
+    grouped = work.resample(rule, origin="epoch", label="left", closed="left")
+    bars = grouped.agg({
+        "open": "first", "high": "max", "low": "min", "close": "last",
+        **({"volume": "sum"} if "volume" in work.columns else {}),
+    })
+    counts = grouped.size()
+    bars = bars.loc[counts[counts >= ratio].index].dropna(subset=["open", "high", "low", "close"])
+    bars = bars.reset_index()
+    bars = only_closed_candles(bars, target_timeframe, now=now)
+    bars.attrs["provider"] = df.attrs.get("provider", "resampled_from_lower_timeframe")
+    return bars
+
+
 @dataclass
 class Candle:
     timestamp: datetime
