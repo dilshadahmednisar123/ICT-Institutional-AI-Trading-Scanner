@@ -58,6 +58,10 @@ class BacktestReport:
     avg_r: float = 0.0
     profit_factor: float = 0.0
     max_consecutive_losses: int = 0
+    data_provider: str = "unavailable"
+    bars_used: int = 0
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
     notes: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,6 +77,10 @@ class BacktestReport:
             "avg_r": round(self.avg_r, 3),
             "profit_factor": round(self.profit_factor, 3),
             "max_consecutive_losses": self.max_consecutive_losses,
+            "data_provider": self.data_provider,
+            "bars_used": self.bars_used,
+            "period_start": self.period_start,
+            "period_end": self.period_end,
             "notes": self.notes,
             "trades": [asdict(t) for t in self.trades[-100:]],
         }
@@ -194,7 +202,13 @@ def run_backtest(
     provider = get_provider("auto")
     df = provider.get_ohlc(symbol, timeframe, limit=limit)
     report = BacktestReport(symbol=symbol, timeframe=timeframe)
-    report.notes.append("Walk-forward MVP on closed windows only")
+    if df is not None and not df.empty:
+        report.data_provider = str(df.attrs.get("provider", provider.__class__.__name__))
+        report.bars_used = len(df)
+        report.period_start = str(df.iloc[0]["timestamp"])
+        report.period_end = str(df.iloc[-1]["timestamp"])
+    report.notes.append("Walk-forward on closed historical candles only; no forming-bar lookahead")
+    report.notes.append(f"Historical data provider: {report.data_provider}; bars: {report.bars_used}")
     report.notes.append("Same-candle SL+TP ambiguity → SL (conservative)")
     report.notes.append("Research tool only — does not claim profitability")
 
