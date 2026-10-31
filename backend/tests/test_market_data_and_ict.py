@@ -50,7 +50,7 @@ def test_validator_counts_duplicates_and_intraday_missing_bars():
 
 
 def test_invalid_ohlc_is_rejected():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     frame = pd.DataFrame([candle(now, 10, 9, 8, 10.5)])
     report = StubProvider().validate(frame, "EURUSD", "1M")
     assert not report.is_valid
