@@ -425,6 +425,15 @@ def test_ict_2022_rejects_unconfirmed_structure_and_pre_sweep_displacement():
 
 
 
+
+def test_backtest_does_not_substitute_synthetic_or_unlicensed_data_without_key(monkeypatch):
+    monkeypatch.delenv("TWELVE_DATA_API_KEY", raising=False)
+    report = backtest_module.run_backtest("EURUSD", timeframe="15M", limit=500)
+    assert report.bars_used == 0
+    assert report.total == 0
+    assert "DATA UNAVAILABLE" in report.data_provider
+
+
 def test_backtest_report_records_real_provider_and_historical_window(monkeypatch):
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     frame = pd.DataFrame([
