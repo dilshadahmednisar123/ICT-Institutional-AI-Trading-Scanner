@@ -113,8 +113,10 @@ class BaseDataProvider(ABC):
     def validate(self, df: pd.DataFrame, symbol: str, timeframe: str) -> DataQualityReport:
         provider_name = self.__class__.__name__
         if df is None or df.empty:
+            provider_name = str(df.attrs.get("provider", provider_name)) if df is not None else provider_name
+            message = str(df.attrs.get("error", "No market candles returned")) if df is not None else "No market candles returned"
             return DataQualityReport(symbol, timeframe, False, provider=provider_name,
-                                     message="No market candles returned", market_status="unavailable")
+                                     message=message, market_status="unavailable")
         required = {"timestamp", "open", "high", "low", "close"}
         if not required.issubset(df.columns):
             return DataQualityReport(symbol, timeframe, False, provider=provider_name,
@@ -226,43 +228,42 @@ class DukascopyHistoricalProvider(BaseDataProvider):
 
 
 class AutoDataProvider(BaseDataProvider):
-    """Prefer configured Twelve Data; fall back to Yahoo only when it yields better data."""
+    """Use only an authenticated market-data provider with permitted trading-data rights."""
     def __init__(self):
-        from .yahoo import YahooFinanceProvider
-        self.yahoo = YahooFinanceProvider()
         self.twelve = None
+        self.configuration_error = None
         if os.getenv("TWELVE_DATA_API_KEY", "").strip():
             try:
                 from .twelve_data import TwelveDataProvider
                 self.twelve = TwelveDataProvider()
             except Exception as exc:
-                logger.warning("Twelve Data adapter unavailable: %s", exc)
+                self.configuration_error = f"Twelve Data adapter unavailable: {type(exc).__name__}"
+                logger.error(self.configuration_error)
+        else:
+            self.configuration_error = "TWELVE_DATA_API_KEY is not configured; licensed market data unavailable"
 
     def get_ohlc(self, symbol: str, timeframe: str, start=None, end=None, limit=500) -> pd.DataFrame:
-        candidates = []
-        if self.twelve is not None:
-            try:
-                frame = self.twelve.get_ohlc(symbol, timeframe, start, end, limit)
-                if frame is not None and not frame.empty:
-                    report = self.twelve.validate(frame, symbol, timeframe)
-                    candidates.append((0 if not report.stale else 1, 0, -report.last_timestamp.timestamp(), frame))
-            except Exception as exc:
-                logger.warning("Twelve Data failed for %s; trying Yahoo fallback: %s", symbol, exc)
+        if self.twelve is None:
+            frame = pd.DataFrame(columns=OHLC_COLUMNS)
+            frame.attrs["provider"] = "DATA UNAVAILABLE (licensed provider not configured)"
+            frame.attrs["error"] = self.configuration_error or "No licensed market data provider configured"
+            return frame
         try:
-            frame = self.yahoo.get_ohlc(symbol, timeframe, start, end, limit)
-            if frame is not None and not frame.empty:
-                report = self.yahoo.validate(frame, symbol, timeframe)
-                candidates.append((0 if not report.stale else 1, 1, -report.last_timestamp.timestamp(), frame))
+            frame = self.twelve.get_ohlc(symbol, timeframe, start, end, limit)
+            if frame is None or frame.empty:
+                frame = pd.DataFrame(columns=OHLC_COLUMNS)
+                frame.attrs["provider"] = "TwelveDataProvider"
+                frame.attrs["error"] = f"Twelve Data returned no candles for {symbol}; verify symbol entitlement and plan"
+                return frame
+            result = frame.tail(limit).reset_index(drop=True)
+            result.attrs["provider"] = frame.attrs.get("provider", "TwelveDataProvider")
+            return result
         except Exception as exc:
-            logger.warning("Yahoo Finance failed for %s: %s", symbol, exc)
-        if not candidates:
-            return pd.DataFrame(columns=OHLC_COLUMNS)
-        # Fresh beats stale; among equal freshness choose the newest candle.
-        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-        selected = candidates[0][3]
-        result = selected.tail(limit).reset_index(drop=True)
-        result.attrs["provider"] = selected.attrs.get("provider", "AutoDataProvider")
-        return result
+            logger.error("Twelve Data failed for %s: %s", symbol, exc)
+            frame = pd.DataFrame(columns=OHLC_COLUMNS)
+            frame.attrs["provider"] = "TwelveDataProvider (request failed)"
+            frame.attrs["error"] = f"Twelve Data request failed: {type(exc).__name__}"
+            return frame
 
     def get_latest_price(self, symbol: str) -> Optional[Dict[str, float]]:
         frame = self.get_ohlc(symbol, "5M", limit=2)
@@ -270,6 +271,21 @@ class AutoDataProvider(BaseDataProvider):
             return None
         mid = float(frame.iloc[-1]["close"])
         return {"mid": mid}
+
+
+class UnavailableDataProvider(BaseDataProvider):
+    """Explicitly disabled feed adapter; never substitutes unlicensed or synthetic prices."""
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    def get_ohlc(self, symbol: str, timeframe: str, start=None, end=None, limit=500) -> pd.DataFrame:
+        frame = pd.DataFrame(columns=OHLC_COLUMNS)
+        frame.attrs["provider"] = "DATA UNAVAILABLE"
+        frame.attrs["error"] = self.reason
+        return frame
+
+    def get_latest_price(self, symbol: str) -> Optional[Dict[str, float]]:
+        return None
 
 
 def get_provider(name: str = "auto") -> BaseDataProvider:
@@ -280,11 +296,12 @@ def get_provider(name: str = "auto") -> BaseDataProvider:
         from .twelve_data import TwelveDataProvider
         return TwelveDataProvider()
     if name == "yahoo":
-        from .yahoo import YahooFinanceProvider
-        return YahooFinanceProvider()
+        return UnavailableDataProvider(
+            "Yahoo Finance data is informational only, must not be redistributed, and is not intended for trading or investing."
+        )
     if name == "auto":
         provider = AutoDataProvider()
-        logger.info("Using resilient auto provider (Twelve Data when configured, Yahoo Finance fallback; synthetic disabled)")
+        logger.info("Using authenticated Twelve Data only; no Yahoo or synthetic trading-data fallback")
         return provider
     if name == "dukascopy":
         return DukascopyHistoricalProvider()
