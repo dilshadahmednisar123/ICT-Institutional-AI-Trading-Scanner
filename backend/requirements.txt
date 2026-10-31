@@ -15,7 +15,5 @@ ruff>=0.7.0
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
 
-# Optional / recommended for production
-# redis>=5.2.0
-# celery>=5.4.0
-# dukascopy-python  # install separately if needed: pip install dukascopy-python
+# Optional production
+redis>=5.2.0
