@@ -79,7 +79,7 @@ jobs:
           print(sys.argv[2], "candles:", len(d["candles"]), "stale:", q.get("stale"), "provider:", q.get("provider"))
           PY
           done
-          curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/signals?limit=100" -o history-before.json
+          curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/signals?limit=500" -o history-before.json
           python - <<'PY'
           import json
           d=json.load(open("history-before.json"))
@@ -101,7 +101,7 @@ jobs:
           print("Production scan pass persisted:", d.get("scanned"), "results; confirmed:", d.get("confirmed"))
           PY
           done
-          curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/signals?limit=100" -o history-after.json
+          curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/signals?limit=500" -o history-after.json
           python - <<'PY'
           import json
           before=json.load(open("history-before.json"))
@@ -257,7 +257,7 @@ jobs:
           print("Scan persisted:", d.get("scanned"), "symbols; confirmed:", d.get("confirmed"))
           PY
               then
-                if curl --fail --silent --show-error --retry 2 --max-time 40 "$BASE/api/v1/signals?limit=100" -o history.json &&
+                if curl --fail --silent --show-error --retry 2 --max-time 40 "$BASE/api/v1/signals?limit=500" -o history.json &&
                    python - <<'PY'
           import json
           d=json.load(open("history.json"))
