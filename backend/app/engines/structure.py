@@ -76,6 +76,7 @@ def find_swing_points(
                     strength=strength,
                     index=i,
                     confirmed=True,
+                    confirmation_index=i + right,
                 )
             )
 
