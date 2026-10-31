@@ -250,6 +250,8 @@ def system_status():
     return {
         "mode": "SIGNAL_ONLY",
         "version": VERSION,
+        "git_commit": os.getenv("VERCEL_GIT_COMMIT_SHA", "unknown"),
+        "git_branch": os.getenv("VERCEL_GIT_COMMIT_REF", "unknown"),
         "auth_enabled": api_key_enabled(),
         "data_feed": "authenticated Twelve Data only; TWELVE_DATA_API_KEY required; Yahoo and synthetic trading feeds disabled",
         "scheduler": get_scheduler_status(),
