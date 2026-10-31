@@ -4,113 +4,78 @@
 
 > Signal-only mode by default. Highly selective. **NO TRADE** is a valid and preferred outcome when conditions are not met.
 
-## Project Status
+**Repository:** https://github.com/dilshadahmednisar123/ICT-Institutional-AI-Trading-Scanner
 
-This repository contains a comprehensive scaffold + core engine implementation based on the full master prompt.  
-**Full production readiness requires API keys for live data, persistent hosting, and further calibration of all 16 ICT models.**
+## Current Progress (v0.2.0-core-engines)
 
-### Implemented Core Modules (MVP)
-- Market data ingestion framework (Dukascopy historical via free open-source libraries)
-- Multi-timeframe OHLC handling
-- Swing High / Low detection (configurable pivots)
-- Market Structure skeleton (HH/HL/LH/LL, BOS, CHOCH)
-- Fair Value Gap (FVG) detection + CE
-- Liquidity pool identification skeleton (BSL / SSL)
-- Displacement quality scoring
-- Premium / Discount / Equilibrium calculation
-- Entry / Structural SL / Liquidity-based TP calculation engines (framework)
-- Setup scoring framework (100-point heuristic)
-- FastAPI backend skeleton with clear endpoints
-- Basic responsive dashboard structure
-- Environment and Docker scaffolding
+### Fully Implemented & Wired
 
-### Still requiring significant work for full production
-- Complete state machines for all 16 ICT models with chronological confirmation sequences
-- Real-time / near-real-time live feed integration (user must supply keys)
-- Persistent 20-minute production scheduler (Celery + Redis or equivalent)
-- Full realistic backtesting engine with spread/slippage/ambiguity rules
-- Android APK packaging (path via Capacitor / PWA provided)
-- News / economic calendar filter
-- Full SMT divergence across correlated instruments
-- Production-grade error handling, monitoring, and auth
+| Module | Status | Notes |
+|--------|--------|-------|
+| Data Provider Layer | ✅ | Abstract provider + quality checks + Dukascopy placeholder + Synthetic for offline |
+| Swing High/Low | ✅ | Configurable left/right, non-repainting |
+| Market Structure | ✅ | HH/HL/LH/LL + BOS detection |
+| Fair Value Gaps | ✅ | Bullish/Bearish FVG + CE + mitigation tracking |
+| Liquidity Engine | ✅ | BSL/SSL, Equal Highs/Lows, Sweep detection + ranking |
+| Displacement | ✅ | Body/Range + ATR-normalized quality score |
+| Premium/Discount | ✅ | Dealing range + 0/25/50/62/70.5/79/100 levels |
+| Core Analysis Pipeline | ✅ | Full sequential pass producing structured results |
+| FastAPI Backend | ✅ | `/api/v1/scan`, `/api/v1/analyze/{symbol}`, health, instruments |
 
-## Architecture
+### Still Pending for Full Production
 
-```
-ICT-Institutional-AI-Trading-Scanner/
-├── backend/                 # Python FastAPI + analysis engines
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── api/
-│   │   ├── core/
-│   │   ├── engines/         # ICT concept detectors
-│   │   ├── models/          # Pydantic + DB models
-│   │   ├── data/            # Data providers & validation
-│   │   └── scheduler/
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/                # Next.js + Tailwind (dark institutional UI)
-├── shared/
-├── docs/
-├── tests/
-├── .env.example
-└── docker-compose.yml
-```
+- Complete state machines for all 16 ICT trading models
+- Real live data feed (requires your API keys)
+- Persistent 20-minute scheduler (Celery/Redis)
+- Structural Entry / SL / Liquidity TP calculation (framework exists, needs model integration)
+- 100-point confluence scoring engine
+- Order Block / Breaker / Mitigation full detectors
+- News calendar filter
+- SMT Divergence
+- Backtesting engine
+- Frontend dashboard + charts
+- Android APK / Capacitor packaging
+- Auth + production deployment
 
-## Tech Stack
-
-- **Backend**: Python 3.11+, FastAPI, Pandas, NumPy, Pydantic
-- **Data**: dukascopy-python / equivalent for historical; Twelve Data / FCS / broker for live (keys required)
-- **Frontend**: Next.js + TypeScript + Tailwind CSS + Lightweight Charts
-- **Database**: PostgreSQL (recommended) or SQLite for local MVP
-- **Mobile**: Fully responsive PWA; Capacitor recommended for native Android APK
-
-## Quick Start (Local MVP)
+## Quick Start
 
 ```bash
 git clone https://github.com/dilshadahmednisar123/ICT-Institutional-AI-Trading-Scanner.git
-cd ICT-Institutional-AI-Trading-Scanner
+cd ICT-Institutional-AI-Trading-Scanner/backend
 
-# Backend
-cd backend
 python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp ../.env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# Frontend (new terminal)
-cd frontend
-npm install
-npm run dev
+# Run the API
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open http://localhost:3000
+Then open:
+- http://localhost:8000/docs  (interactive Swagger UI)
+- POST `/api/v1/scan` with body `{"symbols": ["EURUSD", "XAUUSD"], "timeframe": "15M"}`
+- GET `/api/v1/analyze/EURUSD?timeframe=15M`
 
-## Data Sources — Critical Notes
+## Philosophy (enforced in code)
 
-- **Historical candles**: Free via Dukascopy open data feeds (no key needed for historical).
-- **Live / near-real-time**: Requires a paid or free-tier API key (Twelve Data, FCS API, etc.). Rate limits apply.
-- The system **never fabricates** candles or prices. Missing or stale data → clear `DATA UNAVAILABLE` status. No signals issued from bad data.
-
-## Core Philosophy (from the master prompt)
-
-1. Identify where liquidity is resting  
-2. Wait for a raid + displacement + Market Structure Shift  
-3. Identify a valid PD array (FVG / Order Block / Breaker / etc.)  
-4. Calculate precise structural entry  
-5. Place stop beyond structural invalidation  
-6. Target the next meaningful opposing liquidity  
-7. Enforce minimum Risk:Reward  
-8. Require high confluence  
+1. Liquidity first  
+2. Wait for raid + displacement + structure shift  
+3. Valid PD array  
+4. Precise structural entry  
+5. Stop beyond invalidation  
+6. Target next meaningful opposing liquidity  
+7. Minimum RR filter  
+8. High confluence required  
 9. **NO VALID SETUP = NO TRADE**
+
+## Data Notes
+
+- Historical data path is prepared for free Dukascopy libraries.
+- Current runtime uses a controlled synthetic fallback so the pipeline can be developed and tested offline without external keys.
+- The system **never invents** real market prices for live trading decisions. When real data is unavailable it returns clear `DATA UNAVAILABLE` / quality flags.
 
 ## License & Disclaimer
 
-MIT License — intended for educational and research purposes.
+MIT License — educational and research use.
 
-**Trading involves substantial risk of loss. This software is not financial advice. Past performance is not indicative of future results. Use at your own risk.**
-
----
-
-Scaffolded according to the complete "ICT INSTITUTIONAL AI TRADING SCANNER" master prompt.
+**Trading involves substantial risk of loss. This is not financial advice.**
