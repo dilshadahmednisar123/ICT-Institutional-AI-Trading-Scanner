@@ -1,18 +1,25 @@
 # LIQUIDITY NEXUS
 **Decode Liquidity. Follow Smart Money.**
 
-Signal-only institutional ICT scanner for Forex and Gold. **NO VALID SETUP = NO TRADE**.
+Signal-only ICT scanner for Forex and Gold. **NO VALID SETUP = NO TRADE**.
+
+## Production
+- **Website:** https://liquidity-nexus-agus-902e.vercel.app
+- **API:** https://liquidity-nexus-api-agus-902e.vercel.app
+- **API health:** https://liquidity-nexus-api-agus-902e.vercel.app/health
+- **Repository:** https://github.com/dilshadahmednisar123/ICT-Institutional-AI-Trading-Scanner
 
 ## Architecture
 - Frontend: Next.js 14, React, Tailwind, Lightweight Charts; static export compatible with Capacitor.
-- Backend: FastAPI with deterministic ICT analysis engines.
-- Scheduler: APScheduler server-side, default 20-minute interval; optional Redis job store.
-- Market data: Twelve Data when `TWELVE_DATA_API_KEY` is configured; provider validation and fallback behavior are implemented.
-- Android: Capacitor wrapper; GitHub Actions builds an installable debug APK artifact.
-- Hosting: Vercel frontend; Render persistent backend blueprint (`render.yaml`).
+- Backend: FastAPI deployed as a Vercel Python function.
+- History: private Vercel Blob snapshots; scans are written as immutable JSON objects and read back by the history endpoint.
+- Automation: GitHub Actions scheduled workflow on `main`, every 20 minutes, invokes production scan and verifies persistence. The in-process APScheduler is not relied on for Vercel serverless scheduling.
+- Market data: Yahoo Finance public chart feed by default; Twelve Data is optional when configured. Synthetic candles are not used for production scans.
+- Gold: XAUUSD uses Yahoo `GC=F` gold-futures data as a proxy, not a broker-specific spot feed.
+- Android: Capacitor wrapper. The release workflow requires a persistent Android signing keystore configured as GitHub Actions secrets; see `docs/ANDROID_RELEASE_SIGNING.md`.
 
 ## ICT modules
-Structure/MSS, liquidity pools and sweeps, displacement, FVG, order blocks, premium/discount, entry-risk, scoring, sessions, news-risk filter, SMT, ICT 2022, Silver Bullet, Unicorn, Turtle Soup, OTE, Judas Swing, Power of Three, and walk-forward backtesting.
+Market structure and close-confirmed BOS/CHOCH, liquidity pools and sweeps, displacement, FVG, order blocks, premium/discount, structural entry and stop, opposing-liquidity take-profit selection, RR calculation, confluence scoring, sessions, news-risk filter, SMT, ICT 2022, Silver Bullet, Unicorn, Turtle Soup, OTE, Judas Swing, Power of Three, and walk-forward backtesting.
 
 ## Local development
 ```bash
@@ -28,11 +35,16 @@ npm install
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-## Deployment
-- Frontend: import repository into Vercel, set root directory to `frontend`, configure `NEXT_PUBLIC_API_URL` to the public API URL.
-- Backend: create a Render Blueprint from `render.yaml`; set `TWELVE_DATA_API_KEY` in Render secrets.
-- Scheduler: configure `ENABLE_SCHEDULER=true`; scheduler runs server-side independently of browser and Android app lifecycle.
-- Mobile: push to `main` to run CI and build an installable debug APK. Download it from Actions → workflow run → Artifacts. Tag a commit `v1.0.0` to attach APK to a GitHub Release.
+## Deployment configuration
+- Frontend Vercel root: `frontend`; set `NEXT_PUBLIC_API_URL` to the production API.
+- Backend Vercel root: `backend`; connect the private Blob store so `BLOB_READ_WRITE_TOKEN` is available.
+- GitHub schedule: `.github/workflows/ci-android.yml` uses `*/20 * * * *` on the repository default branch (`main`).
+- Android signing: configure the four secrets documented in `docs/ANDROID_RELEASE_SIGNING.md`. Do not commit a keystore or passwords.
 
 ## Operational limitations
-The ICT engines are deterministic heuristics, not proof of institutional order flow or guaranteed predictive edge. Live data depends on provider coverage, API credentials and rate limits. The current `/api/v1/signals` endpoint is a placeholder and is not backed by a durable signal-history repository; PostgreSQL provisioning alone does not implement signal persistence. The app is signal-only and does not execute trades. Never commit secrets.
+- The ICT engines are deterministic heuristics, not proof of institutional order flow or a guaranteed predictive edge.
+- Setup scores are confluence scores, not calibrated win probabilities.
+- Market-data freshness is validated; stale or unavailable candles result in NO_SETUP rather than a fabricated trade.
+- Yahoo Finance coverage and update cadence can vary. XAUUSD is a futures proxy.
+- The product is signal-only and does not execute trades.
+- Never commit API keys, Blob tokens, or Android signing material.
