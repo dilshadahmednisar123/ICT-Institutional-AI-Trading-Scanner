@@ -50,6 +50,8 @@ jobs:
           assert client.get("/api/v1/status").status_code == 200
           print("Backend API smoke tests passed")
           PY
+      - name: Market-data quality and ICT engine unit tests
+        run: pytest -q tests/test_market_data_and_ict.py
       - name: Production market-data and persistent-history acceptance
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -240,6 +242,15 @@ jobs:
           assert d.get("status") == "completed", d
           assert d.get("scanned") == 6, d
           assert d.get("persistence",{}).get("stored") is True, d.get("persistence")
+          for result in d.get("results", []):
+              quality = result.get("data_quality") or {}
+              assert quality.get("provider"), result
+              if not quality.get("is_valid") or quality.get("stale"):
+                  assert result.get("setup_status") == "NO_SETUP", result
+                  assert not result.get("best_setup"), result
+              if result.get("symbol") == "XAUUSD" and "GC=F" in quality.get("provider", ""):
+                  assert "futures proxy" in quality.get("provider", "").lower(), quality
+                  assert "not spot" in quality.get("provider", "").lower(), quality
           print("Scheduled scan completed and persisted:", d.get("scanned"), "instruments")
           print("Confirmed:", d.get("confirmed"), "Developing:", d.get("developing"), "No setup:", d.get("no_setup"))
           PY
