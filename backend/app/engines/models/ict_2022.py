@@ -130,6 +130,8 @@ def evaluate_ict_2022(
     atr: Optional[float] = None,
     min_rr: float = 0.0,
     structure_events: Optional[List[StructureEvent]] = None,
+    current_bar_high: Optional[float] = None,
+    current_bar_low: Optional[float] = None,
 ) -> List[ICT2022Setup]:
     """
     Evaluate possible ICT 2022 setups for both directions.
@@ -277,13 +279,18 @@ def evaluate_ict_2022(
 
         # If price has not yet returned to the FVG we stay in ENTRY_ZONE_READY (pending)
         in_zone = zlow <= current_price <= zhigh
-        if in_zone:
+        if current_bar_high is not None and current_bar_low is not None:
+            entry_touched = current_bar_low <= entry_price <= current_bar_high
+        else:
+            entry_tolerance = max(abs(setup.fvg.width) * 0.10, abs(entry_price) * 0.00002)
+            entry_touched = abs(current_price - entry_price) <= entry_tolerance
+        if entry_touched:
             setup.state = ModelState.CONFIRMED
             setup.formed_at = now
-            setup.notes.append("Price interacting with entry zone — CONFIRMED (signal-only)")
+            setup.notes.append("Closed candle traded through the planned FVG entry — CONFIRMED (signal-only)")
         else:
             setup.state = ModelState.ENTRY_ZONE_READY
-            setup.notes.append("Entry zone ready — waiting for price to return (DEVELOPING)")
+            setup.notes.append("FVG entry price not yet traded — DEVELOPING; wait for the planned level")
 
         results.append(setup)
 
