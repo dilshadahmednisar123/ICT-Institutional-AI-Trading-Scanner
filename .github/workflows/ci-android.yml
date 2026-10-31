@@ -280,6 +280,21 @@ jobs:
       - name: Verify main branch schedule context
         run: |
           test "$GITHUB_REF" = "refs/heads/main" || { echo "Scheduled/manual production scans must run from main"; exit 1; }
+      - name: Verify deployed backend revision before scanning
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 30 "https://liquidity-nexus-api-agus-902e.vercel.app/api/v1/status" -o backend-status.json
+          python - <<'PY'
+          import json, os
+          status=json.load(open("backend-status.json"))
+          assert status.get("git_commit") == os.environ["EXPECTED_SHA"], {
+              "deployed_commit": status.get("git_commit"),
+              "expected_commit": os.environ["EXPECTED_SHA"],
+          }
+          print("Scanning deployed backend revision:", status["git_commit"])
+          PY
       - name: Run production ICT scan and verify persistence
         run: |
           set -euo pipefail
