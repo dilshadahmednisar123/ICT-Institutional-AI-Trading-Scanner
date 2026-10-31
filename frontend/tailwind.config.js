@@ -8,13 +8,13 @@ module.exports = {
     extend: {
       colors: {
         institutional: {
-          bg: "#0b0f14",
-          panel: "#12181f",
-          border: "#1e2a36",
-          accent: "#3b82f6",
-          green: "#22c55e",
+          bg: "#07111f",
+          panel: "#0c1726",
+          border: "#1c3348",
+          accent: "#22d3ee",
+          green: "#10b981",
           red: "#ef4444",
-          muted: "#94a3b8",
+          muted: "#8da5b9",
         },
       },
     },
