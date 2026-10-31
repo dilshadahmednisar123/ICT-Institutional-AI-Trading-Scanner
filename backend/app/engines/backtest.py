@@ -120,6 +120,7 @@ def _window_setup(
     """Run lightweight ICT 2022 path on a closed window; return trade if CONFIRMED-like."""
     if len(window) < 80:
         return None
+    window = window.reset_index(drop=True)
 
     current_price = float(window.iloc[-1]["close"])
     swings = find_swing_points(window, left=3, right=3)
