@@ -11,6 +11,7 @@ from dataclasses import asdict
 import logging
 
 from .engines.pipeline import analyze_symbol, run_multi_symbol_scan
+from .engines.backtest import run_backtest
 from .data.provider import get_provider
 from .scheduler.scanner import (
     start_scheduler, stop_scheduler, pause_scheduler,
@@ -20,7 +21,7 @@ from .scheduler.scanner import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ict_scanner")
 
-VERSION = "0.6.0-ote-judas-news"
+VERSION = "0.7.0-po3-smt-backtest"
 
 app = FastAPI(
     title="ICT Institutional AI Trading Scanner",
@@ -44,9 +45,9 @@ DEFAULT_SYMBOLS = [
 ENGINES = [
     "structure", "fvg", "liquidity", "displacement",
     "premium_discount", "order_blocks", "entry_risk", "scoring",
-    "sessions", "news_filter",
-    "ict_2022", "silver_bullet", "unicorn", "turtle_soup", "ote", "judas",
-    "pipeline",
+    "sessions", "news_filter", "smt", "backtest",
+    "ict_2022", "silver_bullet", "unicorn", "turtle_soup",
+    "ote", "judas", "po3", "pipeline",
 ]
 
 
@@ -110,20 +111,17 @@ def get_ohlc(
     timeframe: str = Query("15M"),
     limit: int = Query(200, ge=10, le=2000),
 ):
-    """OHLC series for charting (Lightweight Charts compatible)."""
     provider = get_provider()
     df = provider.get_ohlc(symbol.upper(), timeframe, limit=limit)
     quality = provider.validate(df, symbol.upper(), timeframe)
     if not quality.is_valid or df is None or df.empty:
         return {"symbol": symbol, "timeframe": timeframe, "candles": [], "quality": asdict(quality)}
 
+    import pandas as pd
     candles = []
     for _, row in df.iterrows():
         ts = row["timestamp"]
-        if hasattr(ts, "timestamp"):
-            t = int(ts.timestamp())
-        else:
-            t = int(pd_to_unix(ts))
+        t = int(pd.Timestamp(ts).timestamp())
         candles.append({
             "time": t,
             "open": float(row["open"]),
@@ -140,9 +138,14 @@ def get_ohlc(
     }
 
 
-def pd_to_unix(ts):
-    import pandas as pd
-    return pd.Timestamp(ts).timestamp()
+@app.get("/api/v1/backtest/{symbol}")
+def backtest_symbol(
+    symbol: str,
+    timeframe: str = Query("15M"),
+    limit: int = Query(400, ge=100, le=2000),
+):
+    report = run_backtest(symbol.upper(), timeframe=timeframe, limit=limit)
+    return report.to_dict()
 
 
 @app.post("/api/v1/scan")
@@ -163,7 +166,7 @@ def trigger_scan(req: ScanRequest):
             "premium_discount": r.premium_discount,
             "sessions": r.sessions,
             "in_silver_bullet_window": r.in_silver_bullet_window,
-            "news_risk": r.news_risk,
+            "news_risk": getattr(r, "news_risk", "Unknown"),
             "setup_status": r.setup_status,
             "best_setup": r.best_setup,
             "model_setups": r.model_setups,
