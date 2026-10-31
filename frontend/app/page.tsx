@@ -17,6 +17,17 @@ type ScanResult = {
   best_setup?: any;
   chart_overlays?: any;
   smt?: any;
+  data_quality?: {
+    provider?: string;
+    last_timestamp?: string;
+    stale?: boolean;
+    is_valid?: boolean;
+    market_status?: string;
+    gaps_detected?: number;
+    missing_candles?: number;
+    duplicate_candles?: number;
+    message?: string;
+  };
   notes?: string[];
   error?: string;
 };
@@ -134,6 +145,31 @@ export default function Dashboard() {
 
       <PriceChart symbol={selected} timeframe="15M" overlays={overlays} />
 
+      {selectedResult?.data_quality && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="card">
+            <div className="text-xs text-institutional-muted mb-1">FEED STATUS</div>
+            <div className={selectedResult.data_quality.market_status === "market_closed" || selectedResult.data_quality.stale || !selectedResult.data_quality.is_valid ? "text-amber-300 font-semibold" : "text-green-400 font-semibold"}>
+              {selectedResult.data_quality.market_status === "market_closed" ? "MARKET CLOSED" : selectedResult.data_quality.stale ? "STALE" : selectedResult.data_quality.is_valid ? "FRESH" : "UNAVAILABLE"}
+            </div>
+            <div className="text-xs text-institutional-muted mt-1">{selectedResult.data_quality.message || "Feed quality not reported"}</div>
+          </div>
+          <div className="card">
+            <div className="text-xs text-institutional-muted mb-1">DATA PROVIDER</div>
+            <div className="text-sm font-medium break-words">{selectedResult.data_quality.provider || "Unknown"}</div>
+          </div>
+          <div className="card">
+            <div className="text-xs text-institutional-muted mb-1">LAST CANDLE (UTC)</div>
+            <div className="text-sm font-medium tabular-nums">{selectedResult.data_quality.last_timestamp ? new Date(selectedResult.data_quality.last_timestamp).toLocaleString("en-GB", { timeZone: "UTC", hour12: false }) : "—"}</div>
+          </div>
+          <div className="card">
+            <div className="text-xs text-institutional-muted mb-1">DATA INTEGRITY</div>
+            <div className="text-sm font-medium">Gaps {selectedResult.data_quality.gaps_detected ?? 0} · Missing {selectedResult.data_quality.missing_candles ?? 0}</div>
+            <div className="text-xs text-institutional-muted mt-1">Duplicates {selectedResult.data_quality.duplicate_candles ?? 0}</div>
+          </div>
+        </div>
+      )}
+
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -200,7 +236,7 @@ export default function Dashboard() {
       </div>
 
       <div className="text-xs text-institutional-muted text-center pt-4">
-        Backend: {API_BASE}. Live feed: Yahoo Finance (Twelve Data optional). Stale or unavailable data never produces trade signals.
+        Backend: {API_BASE}. Auto feed: Twelve Data preferred when configured, Yahoo Finance fallback. XAUUSD may be a GC=F futures proxy, not spot. Stale or unavailable data never produces trade signals.
       </div>
     </div>
   );
