@@ -251,7 +251,7 @@ def system_status():
         "mode": "SIGNAL_ONLY",
         "version": VERSION,
         "auth_enabled": api_key_enabled(),
-        "data_feed": "auto (Twelve Data when configured; otherwise Yahoo Finance; synthetic disabled)",
+        "data_feed": "auto (Twelve Data preferred when configured; Yahoo Finance fallback; synthetic disabled)",
         "scheduler": get_scheduler_status(),
         "engines_ready": ENGINES,
     }
