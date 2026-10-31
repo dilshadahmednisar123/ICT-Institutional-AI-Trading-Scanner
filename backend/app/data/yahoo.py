@@ -78,7 +78,10 @@ class YahooFinanceProvider(BaseDataProvider):
                 df = (df.set_index("timestamp")
                       .resample("1D").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"})
                       .dropna().reset_index())
-            return df.tail(limit).reset_index(drop=True)
+            result_df = df.tail(limit).reset_index(drop=True)
+            if symbol == "XAUUSD":
+                result_df.attrs["provider"] = "YahooFinanceProvider (GC=F gold futures proxy)"
+            return result_df
         except Exception as exc:
             logger.warning("Yahoo Finance fetch failed for %s (%s): %s", symbol, ticker, exc)
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
