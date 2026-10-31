@@ -101,13 +101,18 @@ jobs:
           BASE="https://liquidity-nexus-api-agus-902e.vercel.app"
           curl --fail --silent --show-error --retry 5 --retry-delay 10 --max-time 30 "$BASE/health" -o health.json
           curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/storage/health" -o storage.json
+          curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/status" -o status.json
           python - <<'PY'
-          import json
+          import json, os
           health=json.load(open("health.json"))
           storage=json.load(open("storage.json"))
+          status=json.load(open("status.json"))
           assert health.get("status") == "ok", health
           assert storage.get("available") is True, storage
-          print("Production health and Blob storage passed:", storage)
+          deployed=status.get("git_commit")
+          expected=os.getenv("GITHUB_SHA")
+          assert deployed == expected, {"deployed_commit":deployed,"expected_commit":expected}
+          print("Production health, Blob storage and deployed source commit passed:", deployed)
           PY
           for symbol in EURUSD XAUUSD; do
             curl --fail --silent --show-error --retry 3 --retry-delay 5 --max-time 45 "$BASE/api/v1/ohlc/$symbol?timeframe=15M&limit=100" -o "$symbol.json"
