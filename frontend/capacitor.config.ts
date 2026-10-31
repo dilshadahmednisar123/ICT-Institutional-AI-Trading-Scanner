@@ -1,19 +1,9 @@
 import type { CapacitorConfig } from '@capacitor/cli';
-
 const config: CapacitorConfig = {
-  appId: 'com.ict.institutional.scanner',
-  appName: 'ICT Institutional Scanner',
+  appId: 'com.liquiditynexus.app',
+  appName: 'LIQUIDITY NEXUS',
   webDir: 'out',
-  server: {
-    // For development you can point to local Next.js; for production use static export
-    androidScheme: 'https',
-  },
-  plugins: {
-    SplashScreen: {
-      launchShowDuration: 2000,
-      backgroundColor: '#0b0f14',
-    },
-  },
+  server: { androidScheme: 'https' },
+  plugins: { SplashScreen: { launchShowDuration: 1800, backgroundColor: '#07111f' } },
 };
-
 export default config;
