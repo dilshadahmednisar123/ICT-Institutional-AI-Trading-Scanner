@@ -206,6 +206,15 @@ def test_forming_candle_is_excluded_from_confirmed_analysis():
     assert closed.iloc[-1]["timestamp"] == now - timedelta(minutes=15)
 
 
+
+def test_daily_candles_must_align_to_utc_day_boundary():
+    ts = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    frame = pd.DataFrame([candle(ts, 1.1, 1.101, 1.099, 1.1)])
+    report = StubProvider().validate(frame, "EURUSD", "1D")
+    assert not report.is_valid
+    assert report.misaligned_candles == 1
+
+
 def test_timeframe_misaligned_candles_are_rejected():
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     frame = pd.DataFrame([candle(now + timedelta(minutes=1), 1.1, 1.101, 1.099, 1.1)])
