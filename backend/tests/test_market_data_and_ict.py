@@ -14,7 +14,7 @@ from app.data.provider import (
     resample_ohlc,
 )
 from app.engines.structure import SwingPoint, StructureEvent, detect_bos_choch, classify_structure, find_swing_points
-from app.engines.liquidity import LiquidityPool, LiquiditySweep, detect_equal_levels, detect_sweeps
+from app.engines.liquidity import LiquidityPool, LiquiditySweep, detect_equal_levels, detect_sweeps, rank_targets
 from app.engines.fvg import FairValueGap, detect_fvgs
 from app.engines.premium_discount import build_dealing_range
 from app.engines.entry_risk import build_trade_levels
