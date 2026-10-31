@@ -2,7 +2,7 @@
 ICT Institutional AI Trading Scanner — FastAPI entry point
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -19,7 +19,7 @@ logger = logging.getLogger("ict_scanner")
 app = FastAPI(
     title="ICT Institutional AI Trading Scanner",
     description="Signal-only ICT scanner. Selective. NO TRADE is preferred when conditions fail.",
-    version="0.2.0-core-engines",
+    version="0.3.0-models",
 )
 
 app.add_middleware(
@@ -53,13 +53,14 @@ class ScanRequest(BaseModel):
 def root():
     return {
         "name": "ICT Institutional AI Trading Scanner",
-        "version": "0.2.0-core-engines",
+        "version": "0.3.0-models",
         "mode": "SIGNAL_ONLY",
         "philosophy": "NO VALID SETUP = NO TRADE",
         "docs": "/docs",
         "engines": [
             "structure", "fvg", "liquidity", "displacement",
-            "premium_discount", "pipeline",
+            "premium_discount", "order_blocks", "entry_risk",
+            "scoring", "ict_2022_model", "pipeline",
         ],
     }
 
@@ -69,7 +70,7 @@ def health():
     return HealthResponse(
         status="ok",
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
-        version="0.2.0-core-engines",
+        version="0.3.0-models",
     )
 
 
@@ -93,10 +94,6 @@ def list_instruments():
 
 @app.post("/api/v1/scan")
 def trigger_scan(req: ScanRequest):
-    """
-    Run the full deterministic ICT analysis pipeline on the requested symbols.
-    Returns structured results. CONFIRMED signals are extremely selective.
-    """
     symbols = req.symbols or DEFAULT_SYMBOLS
     logger.info("Scan requested for %s @ %s", symbols, req.timeframe)
 
@@ -113,7 +110,9 @@ def trigger_scan(req: ScanRequest):
             "bias": r.bias,
             "premium_discount": r.premium_discount,
             "setup_status": r.setup_status,
-            "swings_count": r.swings_count,
+            "best_setup": r.best_setup,
+            "model_setups": r.model_setups,
+            "order_blocks": r.order_blocks,
             "active_fvgs": r.active_fvgs,
             "sweeps": r.sweeps,
             "displacements": r.displacements,
@@ -130,12 +129,13 @@ def trigger_scan(req: ScanRequest):
     return {
         "status": "completed",
         "mode": "SIGNAL_ONLY",
+        "version": "0.3.0-models",
         "scanned": len(serialized),
         "confirmed": len(confirmed),
         "developing": len(developing),
         "no_setup": len(serialized) - len(confirmed) - len(developing),
         "results": serialized,
-        "message": "Analysis complete. CONFIRMED setups require full model sequence (still being expanded).",
+        "message": "Analysis complete. Only CONFIRMED setups with valid RR are considered actionable (signal-only).",
     }
 
 
@@ -144,21 +144,16 @@ def analyze_one(
     symbol: str,
     timeframe: str = Query("15M", description="Timeframe e.g. 5M, 15M, 1H, 4H"),
 ):
-    """Deep analysis of a single instrument."""
     result = analyze_symbol(symbol.upper(), timeframe=timeframe)
     return asdict(result)
 
 
 @app.get("/api/v1/signals")
 def get_signals(status: Optional[str] = None):
-    """
-    Return current signals.
-    Empty list is a valid and expected state for a selective ICT scanner.
-    """
     return {
         "signals": [],
         "count": 0,
-        "message": "No active signals stored yet. Run /api/v1/scan to generate analysis.",
+        "message": "No persistent signal store yet. Run /api/v1/scan for live analysis.",
     }
 
 
@@ -170,10 +165,11 @@ def system_status():
         "next_scan": None,
         "data_feed": "dukascopy_historical_placeholder + synthetic_fallback",
         "mode": "SIGNAL_ONLY",
-        "version": "0.2.0-core-engines",
+        "version": "0.3.0-models",
         "engines_ready": [
             "structure", "fvg", "liquidity", "displacement",
-            "premium_discount", "pipeline",
+            "premium_discount", "order_blocks", "entry_risk",
+            "scoring", "ict_2022_model", "pipeline",
         ],
     }
 
