@@ -7,9 +7,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 type Props = {
   symbol?: string;
   timeframe?: string;
+  overlays?: {
+    trade?: { entry?: number; stop?: number; tp1?: number; tp2?: number; direction?: string };
+    dealing_range?: { high?: number; low?: number; eq?: number };
+    fvgs?: { upper: number; lower: number; direction: string }[];
+  } | null;
 };
 
-export default function PriceChart({ symbol = "EURUSD", timeframe = "15M" }: Props) {
+export default function PriceChart({ symbol = "EURUSD", timeframe = "15M", overlays }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -22,7 +27,6 @@ export default function PriceChart({ symbol = "EURUSD", timeframe = "15M" }: Pro
       setLoading(true);
       setError(null);
       try {
-        // Dynamic import so SSR does not break
         const lc = await import("lightweight-charts");
         if (!containerRef.current || cancelled) return;
 
@@ -37,7 +41,7 @@ export default function PriceChart({ symbol = "EURUSD", timeframe = "15M" }: Pro
             horzLines: { color: "#1e2a36" },
           },
           width: containerRef.current.clientWidth,
-          height: 360,
+          height: 380,
           timeScale: { borderColor: "#1e2a36" },
           rightPriceScale: { borderColor: "#1e2a36" },
         });
@@ -63,6 +67,32 @@ export default function PriceChart({ symbol = "EURUSD", timeframe = "15M" }: Pro
           close: c.close,
         }));
         series.setData(candles);
+
+        // Overlays: entry / SL / TP / dealing range as price lines
+        const addLine = (price: number | undefined, color: string, title: string) => {
+          if (price == null || Number.isNaN(price)) return;
+          series.createPriceLine({
+            price,
+            color,
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title,
+          });
+        };
+
+        if (overlays?.trade) {
+          addLine(overlays.trade.entry, "#3b82f6", "Entry");
+          addLine(overlays.trade.stop, "#ef4444", "SL");
+          addLine(overlays.trade.tp1, "#22c55e", "TP1");
+          addLine(overlays.trade.tp2, "#16a34a", "TP2");
+        }
+        if (overlays?.dealing_range) {
+          addLine(overlays.dealing_range.high, "#64748b", "Range H");
+          addLine(overlays.dealing_range.low, "#64748b", "Range L");
+          addLine(overlays.dealing_range.eq, "#a78bfa", "EQ");
+        }
+
         chart.timeScale().fitContent();
 
         const onResize = () => {
@@ -84,7 +114,7 @@ export default function PriceChart({ symbol = "EURUSD", timeframe = "15M" }: Pro
       cancelled = true;
       if (chart) chart.remove();
     };
-  }, [symbol, timeframe]);
+  }, [symbol, timeframe, overlays]);
 
   return (
     <div className="card">
@@ -95,7 +125,7 @@ export default function PriceChart({ symbol = "EURUSD", timeframe = "15M" }: Pro
       {error && <div className="text-sm text-red-400 mb-2">{error}</div>}
       <div ref={containerRef} className="w-full rounded-lg overflow-hidden" />
       <div className="text-xs text-institutional-muted mt-2">
-        Data from API OHLC endpoint. Overlays (FVG/OB/levels) can be added next.
+        Blue = Entry · Red = SL · Green = TP · Purple = Equilibrium (when setup present)
       </div>
     </div>
   );
