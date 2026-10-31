@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 import app.data.provider as provider_module
+import app.engines.backtest as backtest_module
 from app.data.provider import (
     AutoDataProvider,
     BaseDataProvider,
@@ -380,6 +381,30 @@ def test_ict_2022_rejects_unconfirmed_structure_and_pre_sweep_displacement():
         premium_discount="discount", atr=0.5, structure_events=[structure],
     )
     assert next(s for s in out_of_order if s.direction == "BUY").state == ModelState.SWEEP_OCCURRED
+
+
+
+def test_backtest_report_records_real_provider_and_historical_window(monkeypatch):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    frame = pd.DataFrame([
+        candle(now + timedelta(minutes=15 * i), 1.1, 1.101, 1.099, 1.1)
+        for i in range(220)
+    ])
+    frame.attrs["provider"] = "fixture-historical-feed"
+
+    class HistoricalProvider(StubProvider):
+        def get_ohlc(self, symbol, timeframe, start=None, end=None, limit=500):
+            return frame.copy()
+
+    monkeypatch.setattr(backtest_module, "get_provider", lambda name: HistoricalProvider())
+    report = backtest_module.run_backtest(
+        "EURUSD", timeframe="15M", limit=220, step=20, window_size=200
+    )
+    payload = report.to_dict()
+    assert payload["data_provider"] == "fixture-historical-feed"
+    assert payload["bars_used"] == 220
+    assert payload["period_start"] == str(frame.iloc[0]["timestamp"])
+    assert payload["period_end"] == str(frame.iloc[-1]["timestamp"])
 
 
 def test_walk_forward_backtest_window_runs_ict_pipeline_without_index_errors():
