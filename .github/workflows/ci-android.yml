@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '*/20 * * * *'
 permissions:
   contents: write
   actions: read
@@ -83,3 +85,22 @@ jobs:
         with:
           files: frontend/android/app/build/outputs/apk/debug/app-debug.apk
           generate_release_notes: true
+
+  scheduled-scan:
+    name: Scheduled live market scan
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger production ICT scan
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 10 --max-time 120 \
+            -X POST "https://liquidity-nexus-api-agus-902e.vercel.app/api/v1/scan" \
+            -H "Content-Type: application/json" \
+            -d '{"symbols":["EURUSD","GBPUSD","USDJPY","XAUUSD","AUDUSD","USDCAD"],"timeframe":"15M"}' \
+            -o scan-results.json
+          cat scan-results.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-ict-scan-results
+          path: scan-results.json
+          retention-days: 7
