@@ -14,7 +14,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: liquidity-nexus-${{ github.workflow }}-${{ github.ref }}
+  group: liquidity-nexus-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'schedule' && 'scheduled' || github.run_id }}
   cancel-in-progress: false
 
 jobs:
