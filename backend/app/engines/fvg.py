@@ -59,7 +59,7 @@ def detect_fvgs(
     if len(df) < 3:
         return []
 
-    df = df.tail(lookback).copy()
+    df = df.tail(lookback).copy().reset_index(drop=True)
     if "timestamp" in df.columns:
         times = pd.to_datetime(df["timestamp"])
     else:
