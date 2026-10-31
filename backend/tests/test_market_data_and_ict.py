@@ -83,7 +83,7 @@ def test_ssl_sweep_requires_reclaim_and_marks_bullish():
         candle(now, 1.0010, 1.0020, 1.0005, 1.0010),
         candle(now + timedelta(minutes=15), 1.0010, 1.0015, 0.9990, 1.0005),
         candle(now + timedelta(minutes=30), 1.0005, 1.0020, 1.0000, 1.0015),
-    ])
+    ], index=[41, 42, 43])
     pool = LiquidityPool(price=1.0000, side="SSL", kind="equal_lows", strength=80)
     sweeps = detect_sweeps(frame, [pool])
     assert sweeps
@@ -97,7 +97,7 @@ def test_bsl_sweep_requires_rejection_and_marks_bearish():
         candle(now, 1.0010, 1.0020, 1.0005, 1.0010),
         candle(now + timedelta(minutes=15), 1.0010, 1.0030, 1.0005, 1.0015),
         candle(now + timedelta(minutes=30), 1.0015, 1.0020, 1.0000, 1.0005),
-    ])
+    ], index=[101, 102, 103])
     pool = LiquidityPool(price=1.0020, side="BSL", kind="equal_highs", strength=80)
     sweeps = detect_sweeps(frame, [pool])
     assert sweeps
@@ -111,7 +111,7 @@ def test_bullish_fvg_uses_three_candle_imbalance():
         candle(now, 10.0, 10.5, 9.8, 10.4),
         candle(now + timedelta(minutes=15), 10.4, 11.2, 10.3, 11.1),
         candle(now + timedelta(minutes=30), 11.0, 11.5, 10.8, 11.3),
-    ])
+    ], index=[201, 202, 203])
     fvgs = detect_fvgs(frame)
     assert any(f.direction == "bullish" and f.lower == 10.5 and f.upper == 10.8 for f in fvgs)
 
