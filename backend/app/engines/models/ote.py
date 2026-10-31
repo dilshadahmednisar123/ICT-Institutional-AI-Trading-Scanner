@@ -99,6 +99,8 @@ def evaluate_ote(
     liquidity_pools: List[LiquidityPool],
     atr: Optional[float] = None,
     min_rr: float = 0.0,
+    current_bar_high: Optional[float] = None,
+    current_bar_low: Optional[float] = None,
 ) -> List[OTESetup]:
     results: List[OTESetup] = []
     ts = datetime.now(timezone.utc).isoformat()
@@ -145,8 +147,13 @@ def evaluate_ote(
         setup.notes.append(f"OTE band {ote_low:.5f} – {ote_high:.5f}")
 
         in_zone = ote_low <= current_price <= ote_high
-        if not in_zone:
-            setup.notes.append("Price not inside OTE zone")
+        entry = setup.fib_705 if setup.fib_705 else (ote_low + ote_high) / 2.0
+        bar_touched_entry = (
+            current_bar_high is not None and current_bar_low is not None
+            and current_bar_low <= entry <= current_bar_high
+        )
+        if not in_zone and not bar_touched_entry:
+            setup.notes.append("Price has not interacted with the OTE entry level")
             results.append(setup)
             continue
 
@@ -177,11 +184,12 @@ def evaluate_ote(
             support += 1
             setup.notes.append("Supporting FVG in zone")
 
-        if htf_bias == preferred_bias:
-            support += 1
-            setup.notes.append("HTF bias aligned")
-        elif htf_bias not in ("neutral", preferred_bias):
-            setup.notes.append("HTF bias counter — reduced confluence")
+        if htf_bias != preferred_bias:
+            setup.notes.append(f"HTF bias {htf_bias} is not aligned with {preferred_bias}")
+            results.append(setup)
+            continue
+        support += 1
+        setup.notes.append("HTF bias aligned")
 
         if support < 2:
             setup.notes.append("Insufficient confirmation for OTE entry (need ≥2 factors)")
@@ -189,8 +197,6 @@ def evaluate_ote(
             continue
 
         # Entry at 70.5% (classic) or midpoint of band
-        entry = setup.fib_705 if setup.fib_705 else (ote_low + ote_high) / 2.0
-
         levels = build_trade_levels(
             direction=direction,
             symbol=symbol,
@@ -211,9 +217,18 @@ def evaluate_ote(
             results.append(setup)
             continue
 
-        setup.state = OTEState.CONFIRMED
-        setup.formed_at = ts
-        setup.notes.append("OTE location + confirmations — CONFIRMED (signal-only)")
+        if bar_touched_entry:
+            entry_touched = True
+        else:
+            tolerance = max(abs(ote_high - ote_low) * 0.10, abs(entry) * 0.00002)
+            entry_touched = abs(current_price - entry) <= tolerance
+        if entry_touched:
+            setup.state = OTEState.CONFIRMED
+            setup.formed_at = ts
+            setup.notes.append("Closed candle traded through the planned OTE entry — CONFIRMED (signal-only)")
+        else:
+            setup.state = OTEState.IN_OTE_ZONE
+            setup.notes.append("OTE entry price not yet traded — DEVELOPING")
         results.append(setup)
 
     return results
