@@ -259,7 +259,10 @@ class AutoDataProvider(BaseDataProvider):
             return pd.DataFrame(columns=OHLC_COLUMNS)
         # Fresh beats stale; among equal freshness choose the newest candle.
         candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-        return candidates[0][3].tail(limit).reset_index(drop=True)
+        selected = candidates[0][3]
+        result = selected.tail(limit).reset_index(drop=True)
+        result.attrs["provider"] = selected.attrs.get("provider", "AutoDataProvider")
+        return result
 
     def get_latest_price(self, symbol: str) -> Optional[Dict[str, float]]:
         frame = self.get_ohlc(symbol, "5M", limit=2)
