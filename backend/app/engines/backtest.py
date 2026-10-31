@@ -116,6 +116,7 @@ def _window_setup(
     symbol: str,
     window: pd.DataFrame,
     min_rr: float = 0.0,
+    timeframe: str = "15M",
 ) -> Optional[BacktestTrade]:
     """Run lightweight ICT 2022 path on a closed window; return trade if CONFIRMED-like."""
     if len(window) < 80:
@@ -129,13 +130,13 @@ def _window_setup(
     structure_events = detect_bos_choch(window, swings, timeframe=timeframe)
     dealing = build_dealing_range(swings)
     pd_class = dealing.classify(current_price) if dealing else None
-    fvgs = detect_fvgs(window, timeframe="BT")
-    pools = build_liquidity_map(window, swings, timeframe="BT")
+    fvgs = detect_fvgs(window, timeframe=timeframe)
+    pools = build_liquidity_map(window, swings, timeframe=timeframe)
     sweeps = detect_sweeps(window, pools)
     displacements = detect_displacement(window)
     atr_series = compute_atr(window)
     atr = float(atr_series.iloc[-1]) if len(atr_series) else None
-    order_blocks = detect_order_blocks(window, displacements=displacements, timeframe="BT")
+    order_blocks = detect_order_blocks(window, displacements=displacements, timeframe=timeframe)
 
     setups = evaluate_ict_2022(
         symbol=symbol,
