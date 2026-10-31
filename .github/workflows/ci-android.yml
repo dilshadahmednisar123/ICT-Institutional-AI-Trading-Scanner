@@ -42,6 +42,26 @@ jobs:
           assert instruments.json()["total"] >= 20
           print("Backend API smoke tests passed")
           PY
+      - name: Production API and private Blob persistence smoke test
+        run: |
+          echo "Checking public production endpoints with Vercel Authentication limited to previews"
+          curl --location --fail --silent --show-error --retry 3 --max-time 30 \
+            "https://liquidity-nexus-api-agus-902e.vercel.app/api/v1/storage/health" -o storage-health.json
+          python -c "import json; d=json.load(open('storage-health.json')); assert d['available'] is True, d"
+          SCAN_STATUS=$(curl --location --post301 --post302 --post303 --silent --show-error --retry 2 --max-time 90 \
+            --write-out "%{http_code}" -D scan-headers.txt \
+            -X POST "https://liquidity-nexus-api-agus-902e.vercel.app/api/v1/scan" \
+            -H "Content-Type: application/json" \
+            -d '{"symbols":["EURUSD"],"timeframe":"15M"}' -o scan-results.json)
+          echo "Production scan HTTP status: $SCAN_STATUS"
+          cat scan-headers.txt
+          test "$SCAN_STATUS" = "200" || test "$SCAN_STATUS" = "204"
+          if [ -s scan-results.json ]; then
+            python -c "import json; d=json.load(open('scan-results.json')); assert d['persistence']['stored'] is True, d.get('persistence'); print('Production scan persisted:', d['scanned'])"
+          fi
+          curl --location --fail --silent --show-error --retry 2 --max-time 30 \
+            "https://liquidity-nexus-api-agus-902e.vercel.app/api/v1/signals?limit=1" -o persisted-signals.json
+          python -c "import json; d=json.load(open('persisted-signals.json')); assert d['count'] >= 1, d; print('Persistent history readback passed')"
   android:
     if: github.event_name != 'schedule'
     name: Build Android debug APK
@@ -75,6 +95,11 @@ jobs:
       - run: npx cap sync android
       - name: Build debug APK
         run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - name: Verify APK signature and alignment
+        run: |
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 "$APK"
       - uses: actions/upload-artifact@v4
         with:
           name: liquidity-nexus-debug-apk
@@ -105,7 +130,7 @@ jobs:
     steps:
       - name: Trigger production ICT scan
         run: |
-          curl --fail --silent --show-error --retry 3 --retry-delay 10 --max-time 120 \
+          curl --location --fail --silent --show-error --retry 3 --retry-delay 10 --max-time 120 \
             -X POST "https://liquidity-nexus-api-agus-902e.vercel.app/api/v1/scan" \
             -H "Content-Type: application/json" \
             -d '{"symbols":["EURUSD","GBPUSD","USDJPY","XAUUSD","AUDUSD","USDCAD"],"timeframe":"15M"}' \
