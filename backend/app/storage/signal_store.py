@@ -1,7 +1,6 @@
-"""Persistent scan history backed by a private Vercel Blob store."""
+"""Persistent scan history using the Vercel Blob REST API (private store)."""
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -9,52 +8,75 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 logger = logging.getLogger("ict_scanner.storage")
+BLOB_API = "https://blob.vercel-storage.com"
 
-def _has_token() -> bool:
-    return bool(os.getenv("BLOB_READ_WRITE_TOKEN", "").strip())
+def _token() -> str:
+    return os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
 
-async def _save_async(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    from vercel.blob import AsyncBlobClient
-    now = datetime.now(timezone.utc)
-    pathname = f"signals/{now:%Y/%m/%d/%H%M%S}-{uuid.uuid4().hex}.json"
-    payload = {"timestamp_utc": now.isoformat(), "count": len(results), "results": results}
-    async with AsyncBlobClient() as client:
-        blob = await client.put(
-            pathname,
-            json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"),
-            access="private",
-            content_type="application/json",
-            add_random_suffix=False,
-        )
-    return {"stored": True, "pathname": blob.pathname, "url": blob.url}
+def _headers() -> Dict[str, str]:
+    token = _token()
+    return {"Authorization": f"Bearer {token}", "x-api-version": "7"}
+
+def _list_blobs(limit: int = 1000) -> List[Dict[str, Any]]:
+    response = httpx.get(
+        BLOB_API,
+        params={"prefix": "signals/", "limit": min(max(limit, 1), 1000)},
+        headers=_headers(),
+        timeout=20.0,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return payload.get("blobs", []) if isinstance(payload, dict) else []
 
 def save_scan_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Persist one complete scan as an immutable private JSON blob."""
-    if not _has_token():
+    if not _token():
         return {"stored": False, "reason": "BLOB_READ_WRITE_TOKEN is not configured"}
+    now = datetime.now(timezone.utc)
+    pathname = f"signals/{now:%Y/%m/%d/%H%M%S}-{uuid.uuid4().hex}.json"
+    payload = {
+        "timestamp_utc": now.isoformat(),
+        "count": len(results),
+        "results": results,
+    }
+    headers = {
+        **_headers(),
+        "x-content-type": "application/json",
+        "x-add-random-suffix": "0",
+        "x-allow-overwrite": "0",
+    }
     try:
-        return asyncio.run(_save_async(results))
+        response = httpx.put(
+            f"{BLOB_API}/{pathname}",
+            content=json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"),
+            headers=headers,
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        blob = response.json()
+        return {"stored": True, "pathname": blob.get("pathname", pathname), "url": blob.get("url")}
     except Exception as exc:
         logger.exception("Could not persist scan results")
         return {"stored": False, "reason": f"{type(exc).__name__}: {exc}"}
 
-async def _get_recent_async(limit: int, status: Optional[str]) -> List[Dict[str, Any]]:
-    from vercel.blob import AsyncBlobClient
-    output: List[Dict[str, Any]] = []
-    async with AsyncBlobClient() as client:
-        listed = await client.list_objects(prefix="signals/", limit=1000)
-        blobs = list(getattr(listed, "blobs", []) or [])
-        blobs.sort(
-            key=lambda item: getattr(item, "uploaded_at", None) or getattr(item, "pathname", ""),
-            reverse=True,
-        )
+def get_recent_signals(limit: int = 100, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Read recent private scan snapshots and flatten them into signal rows."""
+    if not _token():
+        return []
+    try:
+        blobs = _list_blobs()
+        blobs.sort(key=lambda item: item.get("uploadedAt") or item.get("pathname", ""), reverse=True)
+        output: List[Dict[str, Any]] = []
         for blob in blobs[:50]:
-            item = await client.get(blob.pathname, access="private")
-            if item is None or item.status_code != 200 or item.stream is None:
+            url = blob.get("url")
+            if not url:
                 continue
-            chunks = [chunk async for chunk in item.stream]
-            snapshot = json.loads(b"".join(chunks).decode("utf-8"))
+            response = httpx.get(url, headers=_headers(), timeout=20.0)
+            response.raise_for_status()
+            snapshot = response.json()
             scanned_at = snapshot.get("timestamp_utc")
             for result in snapshot.get("results", []):
                 if status and str(result.get("setup_status", "")).upper() != status.upper():
@@ -62,32 +84,20 @@ async def _get_recent_async(limit: int, status: Optional[str]) -> List[Dict[str,
                 output.append({**result, "scan_timestamp_utc": scanned_at})
                 if len(output) >= limit:
                     return output
-    return output
-
-def get_recent_signals(limit: int = 100, status: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Read recent scan snapshots and flatten them into signal rows."""
-    if not _has_token():
-        return []
-    try:
-        return asyncio.run(_get_recent_async(limit, status))
+        return output
     except Exception:
         logger.exception("Could not read persisted scan history")
         return []
 
-async def _storage_health_async() -> Dict[str, Any]:
-    from vercel.blob import AsyncBlobClient
-    async with AsyncBlobClient() as client:
-        listed = await client.list_objects(prefix="signals/", limit=1)
+def storage_health() -> Dict[str, Any]:
+    if not _token():
+        return {"available": False, "provider": "Vercel Blob (private)", "reason": "BLOB_READ_WRITE_TOKEN missing"}
+    try:
+        blobs = _list_blobs(limit=1)
         return {
             "available": True,
             "provider": "Vercel Blob (private)",
-            "objects_visible": len(getattr(listed, "blobs", []) or []),
+            "objects_visible": len(blobs),
         }
-
-def storage_health() -> Dict[str, Any]:
-    if not _has_token():
-        return {"available": False, "provider": "Vercel Blob", "reason": "BLOB_READ_WRITE_TOKEN missing"}
-    try:
-        return asyncio.run(_storage_health_async())
     except Exception as exc:
         return {"available": False, "provider": "Vercel Blob (private)", "reason": f"{type(exc).__name__}: {exc}"}
