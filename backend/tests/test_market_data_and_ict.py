@@ -166,6 +166,14 @@ def test_dealing_range_and_premium_discount_equilibrium():
     assert dealing.classify(95.0) == "discount"
 
 
+
+def test_take_profit_selects_nearest_pool_when_opposing_liquidity_strength_ties():
+    nearer = LiquidityPool(price=1.1030, side="BSL", kind="equal_highs", strength=80)
+    farther = LiquidityPool(price=1.1050, side="BSL", kind="swing_high", strength=80)
+    targets = rank_targets([farther, nearer], current_price=1.1010, direction="BUY")
+    assert targets[0] is nearer
+
+
 def test_structural_stop_and_opposing_liquidity_target_rr():
     target = LiquidityPool(price=1.1050, side="BSL", kind="equal_highs", strength=90)
     levels = build_trade_levels(
