@@ -14,8 +14,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: liquidity-nexus-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'schedule' && 'scheduled' || github.run_id }}
-  cancel-in-progress: false
+  group: liquidity-nexus-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'schedule' && 'scheduled' || github.event_name == 'workflow_dispatch' && 'manual' || github.event_name == 'pull_request' && github.event.pull_request.number || 'push' }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   backend:
@@ -164,7 +164,7 @@ jobs:
           PY
 
   android-release:
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     name: Build and verify signed Android release APK
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -272,7 +272,7 @@ jobs:
           files: ${{ runner.temp }}/LIQUIDITY-NEXUS-release.apk
 
   scheduled-scan:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     name: Execute and verify 20-minute production scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
