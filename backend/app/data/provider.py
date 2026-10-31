@@ -105,7 +105,7 @@ class BaseDataProvider(ABC):
             gaps_detected=gaps,
             stale=stale,
             last_timestamp=last_ts,
-            provider=self.__class__.__name__,
+            provider=df.attrs.get("provider", self.__class__.__name__),
             message="OK" if not stale else "Data appears stale",
         )
 
