@@ -248,7 +248,8 @@ jobs:
           for result in d.get("results", []):
               quality = result.get("data_quality") or {}
               assert quality.get("provider"), result
-              if not quality.get("is_valid") or quality.get("stale"):
+              if (not quality.get("is_valid") or quality.get("stale")
+                      or quality.get("market_status") == "market_closed"):
                   assert result.get("setup_status") == "NO_SETUP", result
                   assert not result.get("best_setup"), result
               if result.get("symbol") == "XAUUSD" and "GC=F" in quality.get("provider", ""):
