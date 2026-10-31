@@ -1,13 +1,12 @@
 # ICT Institutional AI Trading Scanner
 
-**Signal-only ICT Institutional Trading Scanner for Forex & Gold.**
-
-> **NO TRADE** is preferred when conditions fail.
+**Signal-only ICT scanner for Forex & Gold.**  
+**NO TRADE** when conditions fail.
 
 **Repo:** https://github.com/dilshadahmednisar123/ICT-Institutional-AI-Trading-Scanner  
-**Version:** `0.6.0-ote-judas-news`
+**Version:** `0.7.0-po3-smt-backtest`
 
-## Models Implemented
+## Models
 
 | Model | Status |
 |-------|--------|
@@ -15,12 +14,20 @@
 | Silver Bullet | ✅ |
 | Unicorn | ✅ |
 | Turtle Soup | ✅ |
-| OTE (Optimal Trade Entry) | ✅ |
+| OTE | ✅ |
 | Judas Swing | ✅ |
+| **PO3 / AMD** | ✅ |
+| **SMT Divergence** | ✅ engine |
 
-## Core Engines
+## Engines
 
-Structure · FVG · Liquidity · Displacement · Premium/Discount · Order Blocks · Entry/SL/TP · Scoring · Sessions · News Filter · Pipeline · 20-min Scheduler
+Structure · FVG · Liquidity · Displacement · Premium/Discount · Order Blocks · Entry/SL/TP · Scoring · Sessions · News Filter · **SMT** · **Backtest** · Scheduler · Pipeline
+
+## UI
+
+- Dark institutional Next.js dashboard  
+- **Lightweight Charts** candlestick chart (click symbol row to load)  
+- Capacitor path for Android APK (`docs/ANDROID_APK.md`)
 
 ## Quick Start
 
@@ -34,25 +41,24 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 cd frontend && npm install && npm run dev
 ```
 
-- UI: http://localhost:3000  
-- API: http://localhost:8000/docs  
-- OHLC for charts: `GET /api/v1/ohlc/EURUSD?timeframe=15M&limit=200`  
-- Android APK: see `docs/ANDROID_APK.md`
+- UI http://localhost:3000  
+- API http://localhost:8000/docs  
+- OHLC `GET /api/v1/ohlc/EURUSD`  
+- Backtest `GET /api/v1/backtest/EURUSD?timeframe=15M`
 
 ## Philosophy
 
-Liquidity → Raid → Displacement → Structure → PD array → Structural entry → Invalidation stop → Opposing liquidity TP → Min RR → High confluence  
+Liquidity → Raid → Displacement → Structure → PD array → Structural entry → Invalidation stop → Liquidity TP → Min RR  
 **NO VALID SETUP = NO TRADE**
 
-## Still Pending
+## Pending
 
-- PO3 / AMD / SMT / more models  
-- Real Dukascopy / Twelve Data live keys  
-- Lightweight Charts UI overlays  
+- Wire real Dukascopy / Twelve Data (API keys)  
+- Chart overlays (FVG/OB/levels)  
 - Redis job store  
-- Backtesting  
-- Auth + production host  
+- Full historical walk-forward backtest  
+- Auth + production deploy  
 
 ## Disclaimer
 
-MIT · Educational use · Not financial advice · Trading involves substantial risk of loss.
+MIT · Educational · Not financial advice · Trading involves substantial risk of loss.
