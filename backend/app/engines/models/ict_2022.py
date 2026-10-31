@@ -159,6 +159,25 @@ def evaluate_ict_2022(
         setup.state = ModelState.HTF_BIAS_OK
         setup.notes.append(f"HTF bias aligned ({htf_bias})")
 
+        # Require a live opposing-side liquidity draw for a structurally valid target.
+        target_side = "BSL" if direction == "BUY" else "SSL"
+        available_targets = [
+            pool for pool in liquidity_pools
+            if pool.side == target_side and pool.remaining and not pool.swept
+        ]
+        if not available_targets:
+            setup.notes.append(f"No unswept opposing {target_side} liquidity target")
+            results.append(setup)
+            continue
+        setup.state = ModelState.LIQUIDITY_IDENTIFIED
+        setup.notes.append(f"Opposing {target_side} liquidity draw identified")
+
+        required_location = "discount" if direction == "BUY" else "premium"
+        if dealing_range is None or premium_discount != required_location:
+            setup.notes.append(f"Entry must be in {required_location}; current location is {premium_discount}")
+            results.append(setup)
+            continue
+
         # 2+3. Liquidity sweep of correct side
         relevant_sweeps = [s for s in sweeps if s.side == sweep_side and s.reclaim_confirmed and s.time is not None]
         if not relevant_sweeps:
@@ -197,6 +216,7 @@ def evaluate_ict_2022(
             setup.notes.append("No close-confirmed BOS/CHOCH after sweep and displacement")
             results.append(setup)
             continue
+        setup.state = ModelState.MSS_CONFIRMED
         setup.notes.append(f"Structure shift confirmed: {post_sweep_structure[-1].event_type}")
 
         matching_obs = [ob for ob in order_blocks if ob.direction == fvg_dir and not ob.invalidated]
@@ -257,7 +277,7 @@ def evaluate_ict_2022(
 
         # If price has not yet returned to the FVG we stay in ENTRY_ZONE_READY (pending)
         in_zone = zlow <= current_price <= zhigh
-        if in_zone or abs(current_price - entry_price) / entry_price < 0.0008:
+        if in_zone:
             setup.state = ModelState.CONFIRMED
             setup.formed_at = now
             setup.notes.append("Price interacting with entry zone — CONFIRMED (signal-only)")
