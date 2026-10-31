@@ -30,6 +30,7 @@ from ..displacement import DisplacementEvent
 from ..order_blocks import OrderBlock
 from ..entry_risk import build_trade_levels, choose_entry_from_fvg, TradeLevels
 from ..premium_discount import DealingRange
+from ..structure import StructureEvent
 
 
 class ModelState(str, Enum):
@@ -128,6 +129,7 @@ def evaluate_ict_2022(
     premium_discount: Optional[str],
     atr: Optional[float] = None,
     min_rr: float = 2.0,
+    structure_events: Optional[List[StructureEvent]] = None,
 ) -> List[ICT2022Setup]:
     """
     Evaluate possible ICT 2022 setups for both directions.
@@ -178,6 +180,24 @@ def evaluate_ict_2022(
         setup.displacement = relevant_disp[-1]
         setup.state = ModelState.DISPLACEMENT
         setup.notes.append(f"Displacement quality {setup.displacement.quality_score}")
+
+        # Require a close-confirmed structure break after both the sweep and displacement.
+        post_sweep_structure = [
+            event for event in (structure_events or [])
+            if event.direction == disp_dir
+            and event.event_type in ("BOS", "CHOCH", "MSS")
+            and event.time >= setup.sweep.time
+            and event.time >= setup.displacement.time
+        ]
+        if not post_sweep_structure:
+            setup.notes.append("No close-confirmed BOS/CHOCH after sweep and displacement")
+            results.append(setup)
+            continue
+        setup.notes.append(f"Structure shift confirmed: {post_sweep_structure[-1].event_type}")
+
+        matching_obs = [ob for ob in order_blocks if ob.direction == fvg_dir and not ob.invalidated]
+        if matching_obs:
+            setup.order_block = matching_obs[-1]
 
         # 5. Prefer also having an FVG created by the move
         active = get_active_fvgs(fvgs, current_price, direction=fvg_dir)
