@@ -1,8 +1,8 @@
 """
 Core Analysis Pipeline
 
-Runs the deterministic ICT engines in sequence and produces a structured result.
-This is the heart of the scanner. Models will later plug into this pipeline.
+Runs the deterministic ICT engines in sequence and produces a structured result
+including ICT 2022 model evaluation and confluence scoring.
 """
 
 from __future__ import annotations
@@ -10,14 +10,16 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Literal
 import logging
-import pandas as pd
 
-from ..data.provider import BaseDataProvider, get_provider, DataQualityReport
+from ..data.provider import BaseDataProvider, get_provider
 from .structure import find_swing_points, classify_structure, detect_bos_choch
 from .fvg import detect_fvgs, get_active_fvgs
-from .liquidity import build_liquidity_map, detect_sweeps, rank_targets
-from .displacement import detect_displacement
+from .liquidity import build_liquidity_map, detect_sweeps
+from .displacement import detect_displacement, compute_atr
 from .premium_discount import build_dealing_range
+from .order_blocks import detect_order_blocks, get_active_order_blocks
+from .models.ict_2022 import evaluate_ict_2022, ModelState
+from .scoring import score_setup
 
 logger = logging.getLogger("ict_scanner.pipeline")
 
@@ -38,7 +40,10 @@ class AnalysisResult:
     liquidity_pools: List[Dict[str, Any]] = field(default_factory=list)
     sweeps: List[Dict[str, Any]] = field(default_factory=list)
     displacements: List[Dict[str, Any]] = field(default_factory=list)
+    order_blocks: List[Dict[str, Any]] = field(default_factory=list)
     structure_events: List[Dict[str, Any]] = field(default_factory=list)
+    model_setups: List[Dict[str, Any]] = field(default_factory=list)
+    best_setup: Optional[Dict[str, Any]] = None
     setup_status: Literal["NO_SETUP", "DEVELOPING", "CONFIRMED", "INVALIDATED"] = "NO_SETUP"
     notes: List[str] = field(default_factory=list)
     error: Optional[str] = None
@@ -49,10 +54,8 @@ def analyze_symbol(
     timeframe: str = "15M",
     provider: Optional[BaseDataProvider] = None,
     limit: int = 400,
+    min_rr: float = 2.0,
 ) -> AnalysisResult:
-    """
-    Full deterministic analysis pass for one symbol + timeframe.
-    """
     provider = provider or get_provider("dukascopy")
     now = datetime.now(timezone.utc).isoformat()
 
@@ -78,42 +81,88 @@ def analyze_symbol(
 
         current_price = float(df.iloc[-1]["close"])
 
-        # Structure
+        # --- Core engines ---
         swings = find_swing_points(df, left=3, right=3, strength="short")
         structure = classify_structure(swings)
         bos_events = detect_bos_choch(df, swings, timeframe=timeframe)
 
-        # Dealing range & premium/discount
         dealing = build_dealing_range(swings)
         pd_class = dealing.classify(current_price) if dealing else None
 
-        # FVGs
         fvgs = detect_fvgs(df, timeframe=timeframe)
         active = get_active_fvgs(fvgs, current_price)
 
-        # Liquidity
         pools = build_liquidity_map(df, swings, timeframe=timeframe)
         sweeps = detect_sweeps(df, pools)
 
-        # Displacement
         displacements = detect_displacement(df)
+        atr_series = compute_atr(df)
+        atr = float(atr_series.iloc[-1]) if len(atr_series) else None
 
-        notes = []
+        order_blocks = detect_order_blocks(df, displacements=displacements, timeframe=timeframe)
+        active_obs = get_active_order_blocks(order_blocks, current_price)
+
+        # --- ICT 2022 Model ---
+        model_setups = evaluate_ict_2022(
+            symbol=symbol,
+            current_price=current_price,
+            htf_bias=structure.get("bias", "neutral"),
+            sweeps=sweeps,
+            displacements=displacements,
+            fvgs=fvgs,
+            order_blocks=order_blocks,
+            liquidity_pools=pools,
+            dealing_range=dealing,
+            premium_discount=pd_class,
+            atr=atr,
+            min_rr=min_rr,
+        )
+
+        # Score each setup
+        scored_setups = []
+        best = None
+        best_score = -1.0
+
+        for s in model_setups:
+            breakdown = score_setup(s, has_mss=bool(bos_events))
+            s.score = breakdown.total
+            s.notes.extend(breakdown.notes)
+            d = s.to_dict()
+            d["score_breakdown"] = {
+                "total": breakdown.total,
+                "classification": breakdown.classification,
+                "components": breakdown.components,
+            }
+            scored_setups.append(d)
+            if breakdown.total > best_score and s.state != ModelState.IDLE:
+                best_score = breakdown.total
+                best = d
+
+        # Determine overall status
         status: Literal["NO_SETUP", "DEVELOPING", "CONFIRMED", "INVALIDATED"] = "NO_SETUP"
+        notes: List[str] = []
 
-        # Very basic developing / confirmed heuristics (full models come later)
-        recent_sweeps = [s for s in sweeps if s.reclaim_confirmed]
-        recent_disp = [d for d in displacements if d.quality_score >= 65][-3:]
+        confirmed = [s for s in model_setups if s.state == ModelState.CONFIRMED]
+        developing = [
+            s
+            for s in model_setups
+            if s.state
+            in (
+                ModelState.ENTRY_ZONE_READY,
+                ModelState.FVG_FORMED,
+                ModelState.DISPLACEMENT,
+                ModelState.SWEEP_OCCURRED,
+            )
+        ]
 
-        if recent_sweeps and recent_disp and active:
-            # Potential developing setup
+        if confirmed:
+            status = "CONFIRMED"
+            notes.append(f"{len(confirmed)} CONFIRMED ICT 2022 setup(s)")
+        elif developing:
             status = "DEVELOPING"
-            notes.append("Liquidity sweep + displacement + active FVG detected → developing setup")
-            notes.append("Full model confirmation (MSS + entry trigger) still required before CONFIRMED")
-        elif recent_sweeps:
-            notes.append("Liquidity sweep observed but missing displacement or FVG")
+            notes.append(f"{len(developing)} developing setup(s) — not yet executable")
         else:
-            notes.append("No qualifying ICT sequence — NO TRADE")
+            notes.append("No qualifying ICT 2022 sequence — NO TRADE")
 
         def ser_fvg(f):
             return {
@@ -122,7 +171,6 @@ def analyze_symbol(
                 "lower": f.lower,
                 "midpoint": f.midpoint,
                 "width": f.width,
-                "timeframe": f.timeframe,
                 "mitigated_pct": f.mitigated_pct,
                 "is_filled": f.is_filled,
             }
@@ -137,21 +185,16 @@ def analyze_symbol(
                 "swept": p.swept,
             }
 
-        def ser_sweep(s):
+        def ser_ob(o):
             return {
-                "side": s.side,
-                "classification": s.classification,
-                "sweep_price": s.sweep_price,
-                "pool_price": s.pool.price,
-                "pool_kind": s.pool.kind,
-            }
-
-        def ser_disp(d):
-            return {
-                "direction": d.direction,
-                "quality_score": d.quality_score,
-                "body_to_range": round(d.body_to_range, 3),
-                "atr_multiple": round(d.atr_multiple, 2),
+                "direction": o.direction,
+                "high": o.high,
+                "low": o.low,
+                "midpoint": o.midpoint,
+                "quality": o.quality,
+                "invalidated": o.invalidated,
+                "is_breaker": o.is_breaker,
+                "mitigation_pct": o.mitigation_pct,
             }
 
         return AnalysisResult(
@@ -165,17 +208,35 @@ def analyze_symbol(
                 "high": dealing.high,
                 "low": dealing.low,
                 "equilibrium": dealing.equilibrium,
-                "levels": dealing.levels,
+                "levels": {str(k): v for k, v in dealing.levels.items()},
             }
             if dealing
             else None,
             premium_discount=pd_class,
             swings_count=len(swings),
-            fvgs=[ser_fvg(f) for f in fvgs[-8:]],
-            active_fvgs=[ser_fvg(f) for f in active[:5]],
-            liquidity_pools=[ser_pool(p) for p in pools[:12]],
-            sweeps=[ser_sweep(s) for s in sweeps[-5:]],
-            displacements=[ser_disp(d) for d in displacements[-5:]],
+            fvgs=[ser_fvg(f) for f in fvgs[-6:]],
+            active_fvgs=[ser_fvg(f) for f in active[:4]],
+            liquidity_pools=[ser_pool(p) for p in pools[:10]],
+            sweeps=[
+                {
+                    "side": s.side,
+                    "classification": s.classification,
+                    "sweep_price": s.sweep_price,
+                    "pool_price": s.pool.price,
+                    "pool_kind": s.pool.kind,
+                }
+                for s in sweeps[-5:]
+            ],
+            displacements=[
+                {
+                    "direction": d.direction,
+                    "quality_score": d.quality_score,
+                    "body_to_range": round(d.body_to_range, 3),
+                    "atr_multiple": round(d.atr_multiple, 2),
+                }
+                for d in displacements[-5:]
+            ],
+            order_blocks=[ser_ob(o) for o in active_obs[:5]],
             structure_events=[
                 {
                     "type": e.event_type,
@@ -185,6 +246,8 @@ def analyze_symbol(
                 }
                 for e in bos_events[-5:]
             ],
+            model_setups=scored_setups,
+            best_setup=best,
             setup_status=status,
             notes=notes,
         )
