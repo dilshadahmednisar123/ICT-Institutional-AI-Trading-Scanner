@@ -231,12 +231,15 @@ jobs:
         run: |
           set -euo pipefail
           BASE="https://liquidity-nexus-api-agus-902e.vercel.app"
-          curl --fail --silent --show-error --retry 3 --retry-delay 10 --max-time 120 \
-            -X POST "$BASE/api/v1/scan" \
-            -H "Content-Type: application/json" \
-            -d '{"symbols":["EURUSD","GBPUSD","USDJPY","XAUUSD","AUDUSD","USDCAD"],"timeframe":"15M"}' \
-            -o scan-results.json
-          python - <<'PY'
+          success=0
+          for attempt in 1 2 3; do
+            echo "Production scan attempt $attempt/3"
+            if curl --fail --silent --show-error --retry 2 --retry-delay 5 --max-time 180 \
+              -X POST "$BASE/api/v1/scan" \
+              -H "Content-Type: application/json" \
+              -d '{"symbols":["EURUSD","GBPUSD","USDJPY","XAUUSD","AUDUSD","USDCAD"],"timeframe":"15M"}' \
+              -o scan-results.json; then
+              if python - <<'PY'
           import json
           d=json.load(open("scan-results.json"))
           assert d.get("status") == "completed", d
@@ -250,16 +253,26 @@ jobs:
                   assert not result.get("best_setup"), result
               if result.get("symbol") == "XAUUSD" and "GC=F" in quality.get("provider", ""):
                   assert "futures proxy" in quality.get("provider", "").lower(), quality
-          print("Scheduled scan completed and persisted:", d.get("scanned"), "instruments")
-          print("Confirmed:", d.get("confirmed"), "Developing:", d.get("developing"), "No setup:", d.get("no_setup"))
+          print("Scan persisted:", d.get("scanned"), "symbols; confirmed:", d.get("confirmed"))
           PY
-          curl --fail --silent --show-error --retry 3 --max-time 40 "$BASE/api/v1/signals?limit=100" -o history.json
-          python - <<'PY'
+              then
+                if curl --fail --silent --show-error --retry 2 --max-time 40 "$BASE/api/v1/signals?limit=100" -o history.json &&
+                   python - <<'PY'
           import json
           d=json.load(open("history.json"))
           assert d.get("count",0) >= 1, d
           print("Persistent history available:", d["count"], "records")
           PY
+                then
+                  success=1
+                  break
+                fi
+              fi
+            fi
+            echo "::warning::Production scan acceptance failed on attempt $attempt; retrying after 15 seconds"
+            sleep 15
+          done
+          test "$success" -eq 1 || { echo "::error::Production scan failed after 3 attempts"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: scheduled-ict-scan-results
