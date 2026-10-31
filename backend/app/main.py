@@ -2,7 +2,7 @@
 ICT Institutional AI Trading Scanner — FastAPI entry point
 """
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -13,6 +13,7 @@ import logging
 from .engines.pipeline import analyze_symbol, run_multi_symbol_scan
 from .engines.backtest import run_backtest
 from .data.provider import get_provider
+from .core.auth import require_api_key, api_key_enabled
 from .scheduler.scanner import (
     start_scheduler, stop_scheduler, pause_scheduler,
     resume_scheduler, get_scheduler_status, trigger_manual_scan,
@@ -21,7 +22,7 @@ from .scheduler.scanner import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ict_scanner")
 
-VERSION = "0.8.0-live-overlays"
+VERSION = "0.9.0-auth-redis-backtest"
 
 app = FastAPI(
     title="ICT Institutional AI Trading Scanner",
@@ -45,7 +46,7 @@ DEFAULT_SYMBOLS = [
 ENGINES = [
     "structure", "fvg", "liquidity", "displacement",
     "premium_discount", "order_blocks", "entry_risk", "scoring",
-    "sessions", "news_filter", "smt", "backtest",
+    "sessions", "news_filter", "smt", "backtest", "auth",
     "ict_2022", "silver_bullet", "unicorn", "turtle_soup",
     "ote", "judas", "po3", "pipeline",
 ]
@@ -56,6 +57,7 @@ class HealthResponse(BaseModel):
     timestamp_utc: str
     version: str
     mode: str = "SIGNAL_ONLY"
+    auth_enabled: bool = False
 
 
 class ScanRequest(BaseModel):
@@ -77,6 +79,7 @@ def root():
         "version": VERSION,
         "mode": "SIGNAL_ONLY",
         "philosophy": "NO VALID SETUP = NO TRADE",
+        "auth_enabled": api_key_enabled(),
         "docs": "/docs",
         "engines": ENGINES,
     }
@@ -88,6 +91,7 @@ def health():
         status="ok",
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
         version=VERSION,
+        auth_enabled=api_key_enabled(),
     )
 
 
@@ -110,6 +114,7 @@ def get_ohlc(
     symbol: str,
     timeframe: str = Query("15M"),
     limit: int = Query(200, ge=10, le=2000),
+    _: None = Depends(require_api_key),
 ):
     provider = get_provider("auto")
     df = provider.get_ohlc(symbol.upper(), timeframe, limit=limit)
@@ -143,13 +148,15 @@ def backtest_symbol(
     symbol: str,
     timeframe: str = Query("15M"),
     limit: int = Query(400, ge=100, le=2000),
+    step: int = Query(20, ge=5, le=100),
+    _: None = Depends(require_api_key),
 ):
-    report = run_backtest(symbol.upper(), timeframe=timeframe, limit=limit)
+    report = run_backtest(symbol.upper(), timeframe=timeframe, limit=limit, step=step)
     return report.to_dict()
 
 
 @app.post("/api/v1/scan")
-def trigger_scan(req: ScanRequest):
+def trigger_scan(req: ScanRequest, _: None = Depends(require_api_key)):
     symbols = req.symbols or DEFAULT_SYMBOLS
     logger.info("Scan requested for %s @ %s", symbols, req.timeframe)
     provider = get_provider("auto")
@@ -200,12 +207,16 @@ def trigger_scan(req: ScanRequest):
 
 
 @app.get("/api/v1/analyze/{symbol}")
-def analyze_one(symbol: str, timeframe: str = Query("15M")):
+def analyze_one(
+    symbol: str,
+    timeframe: str = Query("15M"),
+    _: None = Depends(require_api_key),
+):
     return asdict(analyze_symbol(symbol.upper(), timeframe=timeframe))
 
 
 @app.get("/api/v1/signals")
-def get_signals(status: Optional[str] = None):
+def get_signals(status: Optional[str] = None, _: None = Depends(require_api_key)):
     return {"signals": [], "count": 0, "message": "No persistent signal store yet."}
 
 
@@ -214,6 +225,7 @@ def system_status():
     return {
         "mode": "SIGNAL_ONLY",
         "version": VERSION,
+        "auth_enabled": api_key_enabled(),
         "data_feed": "auto (Twelve Data if TWELVE_DATA_API_KEY else Dukascopy/synthetic)",
         "scheduler": get_scheduler_status(),
         "engines_ready": ENGINES,
@@ -221,37 +233,37 @@ def system_status():
 
 
 @app.post("/api/v1/scheduler/start")
-def scheduler_start(cfg: SchedulerConfig = SchedulerConfig()):
+def scheduler_start(cfg: SchedulerConfig = SchedulerConfig(), _: None = Depends(require_api_key)):
     start_scheduler(interval_minutes=cfg.interval_minutes,
                     symbols=cfg.symbols or DEFAULT_SYMBOLS, timeframe=cfg.timeframe)
     return {"status": "started", **get_scheduler_status()}
 
 
 @app.post("/api/v1/scheduler/stop")
-def scheduler_stop():
+def scheduler_stop(_: None = Depends(require_api_key)):
     stop_scheduler()
     return {"status": "stopped", **get_scheduler_status()}
 
 
 @app.post("/api/v1/scheduler/pause")
-def scheduler_pause():
+def scheduler_pause(_: None = Depends(require_api_key)):
     pause_scheduler()
     return {"status": "paused", **get_scheduler_status()}
 
 
 @app.post("/api/v1/scheduler/resume")
-def scheduler_resume():
+def scheduler_resume(_: None = Depends(require_api_key)):
     resume_scheduler()
     return {"status": "resumed", **get_scheduler_status()}
 
 
 @app.get("/api/v1/scheduler/status")
-def scheduler_status():
+def scheduler_status(_: None = Depends(require_api_key)):
     return get_scheduler_status()
 
 
 @app.post("/api/v1/scheduler/trigger")
-def scheduler_trigger(req: ScanRequest = ScanRequest()):
+def scheduler_trigger(req: ScanRequest = ScanRequest(), _: None = Depends(require_api_key)):
     results = trigger_manual_scan(symbols=req.symbols, timeframe=req.timeframe)
     return {"status": "triggered", "results": results, **get_scheduler_status()}
 
