@@ -13,7 +13,7 @@ import logging
 import pandas as pd
 import httpx
 
-from .provider import BaseDataProvider
+from .provider import BaseDataProvider, only_closed_candles
 
 logger = logging.getLogger("ict_scanner.twelve")
 
@@ -61,6 +61,12 @@ class TwelveDataProvider(BaseDataProvider):
             "format": "JSON",
             "timezone": "UTC",
         }
+        if start:
+            start_utc = start.replace(tzinfo=timezone.utc) if start.tzinfo is None else start.astimezone(timezone.utc)
+            params["start_date"] = start_utc.strftime("%Y-%m-%dT%H:%M:%S")
+        if end:
+            end_utc = end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
+            params["end_date"] = end_utc.strftime("%Y-%m-%dT%H:%M:%S")
         try:
             with httpx.Client(timeout=30.0) as client:
                 r = client.get(f"{self.BASE}/time_series", params=params)
@@ -79,7 +85,7 @@ class TwelveDataProvider(BaseDataProvider):
                     "close": float(v["close"]),
                     "volume": float(v.get("volume") or 0),
                 })
-            frame = pd.DataFrame(rows)
+            frame = only_closed_candles(pd.DataFrame(rows), timeframe)
             frame.attrs["provider"] = (
                 "TwelveDataProvider (XAU/USD spot reference; not broker-specific)"
                 if symbol.upper() == "XAUUSD"
