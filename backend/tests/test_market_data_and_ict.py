@@ -86,6 +86,16 @@ def test_yahoo_provider_is_disabled_for_trading_use():
     assert "not intended for trading" in frame.attrs["error"]
 
 
+
+def test_analysis_returns_no_setup_when_licensed_feed_is_not_configured(monkeypatch):
+    monkeypatch.delenv("TWELVE_DATA_API_KEY", raising=False)
+    result = analyze_symbol("EURUSD", timeframe="15M", provider=AutoDataProvider())
+    assert result.setup_status == "NO_SETUP"
+    assert result.best_setup is None
+    assert result.data_quality["is_valid"] is False
+    assert result.data_quality["market_status"] == "unavailable"
+
+
 def test_unimplemented_dukascopy_returns_unavailable_not_synthetic():
     frame = DukascopyHistoricalProvider().get_ohlc("EURUSD", "15M", limit=10)
     assert frame.empty
