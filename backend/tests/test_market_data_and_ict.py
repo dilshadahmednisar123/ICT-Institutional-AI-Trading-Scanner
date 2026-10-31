@@ -18,7 +18,7 @@ from app.engines.liquidity import LiquidityPool, LiquiditySweep, detect_equal_le
 from app.engines.fvg import FairValueGap, detect_fvgs
 from app.engines.premium_discount import build_dealing_range
 from app.engines.entry_risk import build_trade_levels
-from app.engines.displacement import DisplacementEvent
+from app.engines.displacement import DisplacementEvent, detect_displacement
 from app.engines.order_blocks import detect_order_blocks
 from app.engines.premium_discount import DealingRange
 from app.engines.models.ote import evaluate_ote, OTEState
@@ -272,6 +272,32 @@ def test_bos_does_not_use_pivot_before_right_side_confirmation():
     ]
     events = detect_bos_choch(frame, swings, timeframe="15M")
     assert not any(e.direction == "bullish" for e in events)
+
+
+
+def test_displacement_detector_confirms_large_directional_candle():
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        candle(now + timedelta(minutes=15 * i), 1.1000, 1.1010, 1.0990, 1.1005)
+        for i in range(19)
+    ]
+    rows.append(candle(now + timedelta(minutes=285), 1.1000, 1.1150, 1.0990, 1.1140))
+    frame = pd.DataFrame(rows, index=range(300, 320))
+    events = detect_displacement(frame, atr_period=14, min_body_ratio=0.60, min_atr_multiple=1.2)
+    assert any(e.direction == "bullish" and e.index == 19 and
+               e.body_to_range >= 0.60 and e.atr_multiple >= 1.2 for e in events)
+
+
+def test_higher_timeframe_structure_bias_is_directional():
+    now = datetime.now(timezone.utc)
+    swings = [
+        SwingPoint(10.0, now, "high", index=0),
+        SwingPoint(8.0, now + timedelta(minutes=15), "low", index=1),
+        SwingPoint(11.0, now + timedelta(minutes=30), "high", index=2),
+        SwingPoint(9.0, now + timedelta(minutes=45), "low", index=3),
+    ]
+    structure = classify_structure(swings)
+    assert structure["bias"] == "bullish"
 
 
 def test_bearish_structure_then_bullish_break_is_choch():
