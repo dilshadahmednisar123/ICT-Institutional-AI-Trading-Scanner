@@ -128,7 +128,7 @@ def evaluate_ict_2022(
     dealing_range: Optional[DealingRange],
     premium_discount: Optional[str],
     atr: Optional[float] = None,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
     structure_events: Optional[List[StructureEvent]] = None,
 ) -> List[ICT2022Setup]:
     """
