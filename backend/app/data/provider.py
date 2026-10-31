@@ -24,6 +24,23 @@ TF_MINUTES = {"1M": 1, "5M": 5, "15M": 15, "30M": 30, "1H": 60, "4H": 240, "1D":
 FRESHNESS_MINUTES = {"1M": 3, "5M": 12, "15M": 35, "30M": 70, "1H": 150, "4H": 600, "1D": 2160}
 
 
+
+def only_closed_candles(df: pd.DataFrame, timeframe: str,
+                        now: Optional[datetime] = None) -> pd.DataFrame:
+    """Drop the still-forming bar so confirmed analysis only sees closed candles."""
+    if df is None or df.empty or "timestamp" not in df.columns:
+        return df
+    minutes = TF_MINUTES.get(timeframe.upper(), 15)
+    current = pd.Timestamp(now or datetime.now(timezone.utc))
+    if current.tzinfo is None:
+        current = current.tz_localize("UTC")
+    else:
+        current = current.tz_convert("UTC")
+    opened = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    closed_at = opened + pd.Timedelta(minutes=minutes)
+    return df.loc[closed_at <= current].copy().reset_index(drop=True)
+
+
 @dataclass
 class Candle:
     timestamp: datetime
