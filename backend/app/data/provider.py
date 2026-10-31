@@ -44,6 +44,7 @@ class DataQualityReport:
     is_valid: bool
     missing_candles: int = 0
     duplicate_candles: int = 0
+    misaligned_candles: int = 0
     gaps_detected: int = 0
     stale: bool = False
     last_timestamp: Optional[datetime] = None
@@ -94,11 +95,22 @@ class BaseDataProvider(ABC):
                                      message=f"Invalid OHLC candle(s): {int(invalid_ohlc.sum())}",
                                      market_status="invalid")
 
+        tf = timeframe.upper()
+        expected = TF_MINUTES.get(tf, 15)
+        misaligned_count = 0
+        if tf in ("1M", "5M", "15M", "30M", "1H", "4H"):
+            epoch_seconds = work["timestamp"].astype("int64") // 1_000_000_000
+            misaligned_count = int((epoch_seconds % (expected * 60) != 0).sum())
+        if misaligned_count:
+            return DataQualityReport(
+                symbol, timeframe, False, misaligned_candles=misaligned_count,
+                provider=str(df.attrs.get("provider", provider_name)),
+                message=f"{misaligned_count} candle timestamp(s) are not aligned to {timeframe}",
+                market_status="invalid",
+            )
         duplicate_count = int(work["timestamp"].duplicated(keep="last").sum())
         work = work.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last")
         diffs = work["timestamp"].diff().dropna()
-        tf = timeframe.upper()
-        expected = TF_MINUTES.get(tf, 15)
         # Count intraday missing bars, but do not classify normal session/weekend closures
         # as missing candles. Larger breaks remain visible as a feed/session gap in status.
         max_counted_gap = timedelta(hours=6)
@@ -124,7 +136,7 @@ class BaseDataProvider(ABC):
         return DataQualityReport(
             symbol=symbol, timeframe=timeframe, is_valid=True,
             missing_candles=missing, duplicate_candles=duplicate_count,
-            gaps_detected=gaps, stale=stale, last_timestamp=last_ts,
+            misaligned_candles=misaligned_count, gaps_detected=gaps, stale=stale, last_timestamp=last_ts,
             provider=provider, message=message, market_status=market_status,
         )
 
