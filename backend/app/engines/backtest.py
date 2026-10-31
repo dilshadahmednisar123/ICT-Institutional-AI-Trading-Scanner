@@ -191,11 +191,12 @@ def run_backtest(
     provider = get_provider("auto")
     df = provider.get_ohlc(symbol, timeframe, limit=limit)
     report = BacktestReport(symbol=symbol, timeframe=timeframe)
-    if df is not None and not df.empty:
+    if df is not None:
         report.data_provider = str(df.attrs.get("provider", provider.__class__.__name__))
-        report.bars_used = len(df)
-        report.period_start = str(df.iloc[0]["timestamp"])
-        report.period_end = str(df.iloc[-1]["timestamp"])
+        if not df.empty:
+            report.bars_used = len(df)
+            report.period_start = str(df.iloc[0]["timestamp"])
+            report.period_end = str(df.iloc[-1]["timestamp"])
     report.notes.append("Walk-forward on closed historical candles only; no forming-bar lookahead")
     report.notes.append(f"Historical data provider: {report.data_provider}; bars: {report.bars_used}")
     report.notes.append("Same-candle SL+TP ambiguity → SL (conservative)")
