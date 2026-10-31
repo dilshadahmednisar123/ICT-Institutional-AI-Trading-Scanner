@@ -22,11 +22,11 @@ from .scheduler.scanner import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ict_scanner")
 
-VERSION = "0.9.0-auth-redis-backtest"
+VERSION = "1.0.0-liquidity-nexus"
 
 app = FastAPI(
-    title="ICT Institutional AI Trading Scanner",
-    description="Signal-only ICT scanner. Selective. NO TRADE is preferred when conditions fail.",
+    title="LIQUIDITY NEXUS",
+    description="Decode Liquidity. Follow Smart Money. Signal-only ICT scanner.",
     version=VERSION,
 )
 
@@ -75,7 +75,8 @@ class SchedulerConfig(BaseModel):
 @app.get("/")
 def root():
     return {
-        "name": "ICT Institutional AI Trading Scanner",
+        "name": "LIQUIDITY NEXUS",
+        "tagline": "Decode Liquidity. Follow Smart Money.",
         "version": VERSION,
         "mode": "SIGNAL_ONLY",
         "philosophy": "NO VALID SETUP = NO TRADE",
@@ -83,6 +84,20 @@ def root():
         "docs": "/docs",
         "engines": ENGINES,
     }
+
+
+@app.on_event("startup")
+def startup_scheduler():
+    """Start the server-side scanner independently of browser/mobile clients."""
+    import os
+    if os.getenv("ENABLE_SCHEDULER", "false").lower() in ("1", "true", "yes", "on"):
+        interval = int(os.getenv("SCAN_INTERVAL_MINUTES", "20"))
+        start_scheduler(interval_minutes=interval, symbols=DEFAULT_SYMBOLS, timeframe="15M")
+
+
+@app.on_event("shutdown")
+def shutdown_scheduler():
+    stop_scheduler()
 
 
 @app.get("/health", response_model=HealthResponse)
