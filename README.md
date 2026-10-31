@@ -6,37 +6,35 @@
 
 **Repo:** https://github.com/dilshadahmednisar123/ICT-Institutional-AI-Trading-Scanner
 
-## Current Version: `0.4.0-sessions-scheduler`
+## Current Version: `0.5.0-multi-model`
 
 ### Implemented
 
 | Module | Status |
 |--------|--------|
 | Data Provider + quality checks | ✅ |
-| Swing / Structure / BOS | ✅ |
-| Fair Value Gaps + CE | ✅ |
-| Liquidity (BSL/SSL, sweeps, ranking) | ✅ |
-| Displacement | ✅ |
-| Premium / Discount / Equilibrium | ✅ |
-| Order Blocks + Breakers | ✅ |
+| Structure / FVG / Liquidity / Displacement | ✅ |
+| Premium-Discount / Order Blocks | ✅ |
 | Entry + Structural SL + Liquidity TP | ✅ |
-| 100-point Confluence Scoring | ✅ |
+| 100-point Scoring | ✅ |
+| Session Engine + Silver Bullet windows | ✅ |
 | **ICT 2022 Mentorship Model** | ✅ |
-| **ICT Silver Bullet Model** | ✅ |
-| **Session Engine** (Asian / London / NY + SB windows) | ✅ |
-| **20-minute APScheduler** + start/stop/pause/resume | ✅ |
-| FastAPI with full endpoints | ✅ |
-| **Frontend dashboard** (Next.js + Tailwind dark institutional) | ✅ |
+| **Silver Bullet Model** | ✅ |
+| **Unicorn Model** | ✅ |
+| **Turtle Soup Model** | ✅ |
+| 20-min APScheduler + controls | ✅ |
+| FastAPI full endpoints | ✅ |
+| Next.js dark institutional dashboard | ✅ |
+| Capacitor Android APK path + docs | ✅ |
 
 ### Still Pending
 
-- Remaining ICT models (Unicorn, Turtle Soup, OTE, Judas, PO3, etc.)
-- Real live market data (API keys required)
-- Persistent job store (Redis/SQLAlchemy) for production scheduler
-- Charts (Lightweight Charts)
-- News filter + SMT
-- Backtesting
-- Android APK via Capacitor
+- Remaining models (OTE, Judas, PO3, AMD, Breaker-only, FVG continuation, SMT, etc.)
+- Real live Dukascopy / Twelve Data wiring (keys required)
+- Lightweight Charts overlays
+- Redis/SQLAlchemy persistent job store
+- News calendar filter
+- Backtesting engine
 - Auth + production deployment
 
 ## Quick Start
@@ -44,8 +42,7 @@
 ### Backend
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -53,23 +50,23 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ### Frontend
 ```bash
 cd frontend
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
-Open http://localhost:3000  
-API docs: http://localhost:8000/docs
+- Dashboard: http://localhost:3000  
+- API docs: http://localhost:8000/docs  
+
+### Android APK
+See [docs/ANDROID_APK.md](docs/ANDROID_APK.md) for Capacitor build steps.
 
 ### Scheduler
 ```
-POST /api/v1/scheduler/start   {"interval_minutes": 20}
-POST /api/v1/scheduler/pause
-POST /api/v1/scheduler/resume
-POST /api/v1/scheduler/stop
+POST /api/v1/scheduler/start
+POST /api/v1/scheduler/pause | resume | stop
 GET  /api/v1/scheduler/status
 ```
 
-## Philosophy (enforced in code)
+## Philosophy
 
 1. Liquidity first  
 2. Raid + Displacement + Structure  
