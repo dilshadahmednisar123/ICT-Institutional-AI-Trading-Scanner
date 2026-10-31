@@ -239,6 +239,25 @@ def test_swing_points_record_right_side_confirmation_index():
     assert pivot.confirmation_index == 6
 
 
+
+def test_bos_does_not_use_pivot_before_right_side_confirmation():
+    now = datetime.now(timezone.utc)
+    frame = pd.DataFrame([
+        candle(now, 9.0, 9.5, 8.8, 9.2),
+        candle(now + timedelta(minutes=15), 9.2, 10.0, 9.0, 9.5),
+        candle(now + timedelta(minutes=30), 9.5, 9.8, 8.0, 9.0),
+        candle(now + timedelta(minutes=45), 9.0, 9.7, 8.5, 9.3),
+        candle(now + timedelta(minutes=60), 9.3, 10.2, 9.2, 10.1),
+        candle(now + timedelta(minutes=75), 10.1, 10.3, 9.8, 10.2),
+    ])
+    swings = [
+        SwingPoint(10.0, now + timedelta(minutes=15), "high", index=1, confirmation_index=4),
+        SwingPoint(8.0, now + timedelta(minutes=30), "low", index=2, confirmation_index=5),
+    ]
+    events = detect_bos_choch(frame, swings, timeframe="15M")
+    assert not any(e.direction == "bullish" for e in events)
+
+
 def test_bearish_structure_then_bullish_break_is_choch():
     now = datetime.now(timezone.utc)
     frame = pd.DataFrame([
