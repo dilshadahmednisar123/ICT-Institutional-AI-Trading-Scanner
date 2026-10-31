@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Literal
 import logging
 
-from ..data.provider import BaseDataProvider, get_provider
+from ..data.provider import BaseDataProvider, get_provider, resample_ohlc
 from .structure import find_swing_points, classify_structure, detect_bos_choch
 from .fvg import detect_fvgs, get_active_fvgs
 from .liquidity import build_liquidity_map, detect_sweeps
@@ -149,7 +149,9 @@ def analyze_symbol(
         htf_bias = "neutral"
         htf_note = "HTF bias unavailable; neutral context applied"
         try:
-            htf_df = provider.get_ohlc(symbol, htf_timeframe, limit=240)
+            htf_df = resample_ohlc(df, timeframe, htf_timeframe)
+            if len(htf_df) < 30:
+                htf_df = provider.get_ohlc(symbol, htf_timeframe, limit=240)
             htf_quality = provider.validate(htf_df, symbol, htf_timeframe)
             if (htf_quality.is_valid and not htf_quality.stale
                     and htf_quality.market_status != "market_closed" and len(htf_df) >= 30):
