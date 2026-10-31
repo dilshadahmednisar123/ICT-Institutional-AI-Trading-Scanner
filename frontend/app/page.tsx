@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import PriceChart from "../components/PriceChart";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -11,6 +12,7 @@ type ScanResult = {
   premium_discount?: string;
   sessions?: string[];
   in_silver_bullet_window?: boolean;
+  news_risk?: string;
   setup_status: string;
   best_setup?: any;
   notes?: string[];
@@ -22,6 +24,7 @@ export default function Dashboard() {
   const [results, setResults] = useState<ScanResult[]>([]);
   const [meta, setMeta] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState("EURUSD");
 
   async function runScan() {
     setLoading(true);
@@ -64,7 +67,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Market Scanner</h1>
           <p className="text-sm text-institutional-muted mt-1">
-            Deterministic ICT analysis · Signal-only mode · NO TRADE is preferred when conditions fail
+            Deterministic ICT analysis · Signal-only · NO TRADE preferred when conditions fail
           </p>
         </div>
         <button
@@ -101,6 +104,8 @@ export default function Dashboard() {
         </div>
       )}
 
+      <PriceChart symbol={selected} timeframe="15M" />
+
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -110,6 +115,7 @@ export default function Dashboard() {
               <th className="pb-3 pr-4">Bias</th>
               <th className="pb-3 pr-4">P/D</th>
               <th className="pb-3 pr-4">Session</th>
+              <th className="pb-3 pr-4">News</th>
               <th className="pb-3 pr-4">Status</th>
               <th className="pb-3 pr-4">Model / Score</th>
               <th className="pb-3">Notes</th>
@@ -118,23 +124,26 @@ export default function Dashboard() {
           <tbody>
             {results.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-10 text-center text-institutional-muted">
+                <td colSpan={9} className="py-10 text-center text-institutional-muted">
                   Click <strong>Run Scan</strong> to analyze markets. Empty results are normal and preferred.
                 </td>
               </tr>
             )}
             {results.map((r) => (
-              <tr key={r.symbol} className="border-b border-institutional-border/60 hover:bg-white/[0.02]">
+              <tr
+                key={r.symbol}
+                className="border-b border-institutional-border/60 hover:bg-white/[0.02] cursor-pointer"
+                onClick={() => setSelected(r.symbol)}
+              >
                 <td className="py-3 pr-4 font-medium">{r.symbol}</td>
                 <td className="py-3 pr-4 tabular-nums">{r.current_price?.toFixed(5) ?? "—"}</td>
                 <td className="py-3 pr-4 capitalize">{r.bias ?? "—"}</td>
                 <td className="py-3 pr-4 capitalize">{r.premium_discount ?? "—"}</td>
                 <td className="py-3 pr-4 text-xs">
                   {(r.sessions || []).join(", ") || "—"}
-                  {r.in_silver_bullet_window && (
-                    <span className="ml-1 text-blue-400">SB</span>
-                  )}
+                  {r.in_silver_bullet_window && <span className="ml-1 text-blue-400">SB</span>}
                 </td>
+                <td className="py-3 pr-4 text-xs">{r.news_risk ?? "—"}</td>
                 <td className="py-3 pr-4">
                   <span className={statusBadge(r.setup_status)}>{r.setup_status}</span>
                 </td>
@@ -143,7 +152,8 @@ export default function Dashboard() {
                     <>
                       <div>{r.best_setup.model}</div>
                       <div className="text-institutional-muted">
-                        {r.best_setup.direction} · Score {r.best_setup.score ?? r.best_setup.score_breakdown?.total ?? "—"}
+                        {r.best_setup.direction} · Score{" "}
+                        {r.best_setup.score ?? r.best_setup.score_breakdown?.total ?? "—"}
                       </div>
                     </>
                   ) : (
@@ -160,7 +170,7 @@ export default function Dashboard() {
       </div>
 
       <div className="text-xs text-institutional-muted text-center pt-4">
-        Backend must be running at {API_BASE}. Data currently uses offline/synthetic fallback until live feeds are configured.
+        Backend: {API_BASE}. Click a row to load its chart. Data uses offline/synthetic fallback until live feeds are configured.
       </div>
     </div>
   );
