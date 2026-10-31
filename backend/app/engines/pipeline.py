@@ -182,7 +182,16 @@ def analyze_symbol(
                 best = d
 
         for s in m2022:
-            bd = score_setup(s, has_mss=bool(bos_events), session_score=sess_score, smt_score=smt_bonus)
+            has_mss = bool(
+                s.sweep and s.displacement and any(
+                    event.direction == ("bullish" if s.direction == "BUY" else "bearish")
+                    and event.event_type in ("BOS", "CHOCH", "MSS")
+                    and event.time >= s.sweep.time
+                    and event.time >= s.displacement.time
+                    for event in bos_events
+                )
+            )
+            bd = score_setup(s, has_mss=has_mss, session_score=sess_score, smt_score=smt_bonus)
             s.score = bd.total
             s.notes.extend(bd.notes)
             d = s.to_dict()
