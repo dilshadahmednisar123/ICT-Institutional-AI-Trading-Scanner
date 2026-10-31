@@ -135,53 +135,40 @@ def detect_bos_choch(
     swings: List[SwingPoint],
     timeframe: str = "15M",
 ) -> List[StructureEvent]:
-    """
-    Detect Break of Structure and Change of Character.
-    Requires closed candle beyond swing level.
-    """
+    """Detect one-time close-confirmed breaks of the latest confirmed swing levels."""
     events: List[StructureEvent] = []
     if len(swings) < 2 or len(df) < 5:
         return events
 
-    closes = df["close"].values
     times = pd.to_datetime(df["timestamp"]) if "timestamp" in df.columns else df.index
+    ordered = sorted(swings, key=lambda swing: swing.index)
+    active_bias = classify_structure(ordered).get("bias", "neutral")
+    broken_high_indices: set[int] = set()
+    broken_low_indices: set[int] = set()
 
-    last_swing_high = None
-    last_swing_low = None
+    for i in range(1, len(df)):
+        eligible = [s for s in ordered if s.index < i]
+        highs = [s for s in eligible if s.kind == "high"]
+        lows = [s for s in eligible if s.kind == "low"]
+        if not highs or not lows:
+            continue
+        swing_high, swing_low = highs[-1], lows[-1]
+        previous_close = float(df.iloc[i - 1]["close"])
+        close = float(df.iloc[i]["close"])
+        tv = times[i]
+        event_time = tv.to_pydatetime() if hasattr(tv, "to_pydatetime") else tv
 
-    for s in swings:
-        if s.kind == "high":
-            last_swing_high = s
-        else:
-            last_swing_low = s
+        if swing_high.index not in broken_high_indices and previous_close <= swing_high.price < close:
+            event_type = "CHOCH" if active_bias == "bearish" else "BOS"
+            events.append(StructureEvent(event_type=event_type, direction="bullish", price=close,
+                time=event_time, broken_level=swing_high.price, confirmed_by_close=True, timeframe=timeframe))
+            broken_high_indices.add(swing_high.index)
+            active_bias = "bullish"
 
-        # Check subsequent closes
-        for j in range(s.index + 1, len(df)):
-            if last_swing_high and closes[j] > last_swing_high.price:
-                events.append(
-                    StructureEvent(
-                        event_type="BOS",
-                        direction="bullish",
-                        price=float(closes[j]),
-                        time=times[j],
-                        broken_level=last_swing_high.price,
-                        confirmed_by_close=True,
-                        timeframe=timeframe,
-                    )
-                )
-                break
-            if last_swing_low and closes[j] < last_swing_low.price:
-                events.append(
-                    StructureEvent(
-                        event_type="BOS",
-                        direction="bearish",
-                        price=float(closes[j]),
-                        time=times[j],
-                        broken_level=last_swing_low.price,
-                        confirmed_by_close=True,
-                        timeframe=timeframe,
-                    )
-                )
-                break
-
+        if swing_low.index not in broken_low_indices and previous_close >= swing_low.price > close:
+            event_type = "CHOCH" if active_bias == "bullish" else "BOS"
+            events.append(StructureEvent(event_type=event_type, direction="bearish", price=close,
+                time=event_time, broken_level=swing_low.price, confirmed_by_close=True, timeframe=timeframe))
+            broken_low_indices.add(swing_low.index)
+            active_bias = "bearish"
     return events
