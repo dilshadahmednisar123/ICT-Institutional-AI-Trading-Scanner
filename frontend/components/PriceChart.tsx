@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 type Props = {
   symbol?: string;
@@ -27,6 +27,7 @@ export default function PriceChart({ symbol = "EURUSD", timeframe = "15M", overl
       setLoading(true);
       setError(null);
       try {
+        if (!API_BASE) throw new Error("Production API is not configured. Set NEXT_PUBLIC_API_URL and redeploy.");
         const lc = await import("lightweight-charts");
         if (!containerRef.current || cancelled) return;
 
