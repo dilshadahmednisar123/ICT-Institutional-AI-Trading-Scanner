@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import PriceChart from "../components/PriceChart";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 type ScanResult = {
   symbol: string;
@@ -57,6 +57,7 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
+      if (!API_BASE) throw new Error("Production API is not configured. Set NEXT_PUBLIC_API_URL and redeploy.");
       const res = await fetch(`${API_BASE}/api/v1/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -76,7 +77,7 @@ export default function Dashboard() {
         message: data.message,
       });
     } catch (e: any) {
-      setError(e.message || "Failed to reach backend. Is the API running on :8000?");
+      setError(e.message || "Failed to reach the configured production API.");
     } finally {
       setLoading(false);
     }
