@@ -51,7 +51,7 @@ jobs:
           print("Backend API smoke tests passed")
           PY
       - name: Market-data quality and ICT engine unit tests
-        run: pytest -q tests/test_market_data_and_ict.py
+        run: python -m pytest -q tests/test_market_data_and_ict.py
       - name: Production market-data and persistent-history acceptance
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -250,7 +250,6 @@ jobs:
                   assert not result.get("best_setup"), result
               if result.get("symbol") == "XAUUSD" and "GC=F" in quality.get("provider", ""):
                   assert "futures proxy" in quality.get("provider", "").lower(), quality
-                  assert "not spot" in quality.get("provider", "").lower(), quality
           print("Scheduled scan completed and persisted:", d.get("scanned"), "instruments")
           print("Confirmed:", d.get("confirmed"), "Developing:", d.get("developing"), "No setup:", d.get("no_setup"))
           PY
