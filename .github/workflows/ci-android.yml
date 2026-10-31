@@ -87,6 +87,16 @@ jobs:
         with:
           files: frontend/android/app/build/outputs/apk/debug/app-debug.apk
           generate_release_notes: true
+      - name: Publish latest APK for direct download
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: LIQUIDITY NEXUS Android APK (latest)
+          target_commitish: main
+          prerelease: true
+          overwrite_files: true
+          files: frontend/android/app/build/outputs/apk/debug/app-debug.apk
 
   scheduled-scan:
     name: Scheduled live market scan
