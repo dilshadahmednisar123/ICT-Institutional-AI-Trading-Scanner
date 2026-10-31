@@ -261,11 +261,11 @@ def rank_targets(
         candidates = [p for p in pools if p.side == "SSL" and p.price < current_price and p.remaining]
 
     # Prefer higher strength, then closer distance (but not tiny noise)
-    def score(p: LiquidityPool) -> float:
+    def score(p: LiquidityPool) -> tuple[float, float]:
         dist = abs(p.price - current_price) / current_price
-        # penalize extremely close internal levels slightly
-        dist_penalty = 0.0 if dist > 0.001 else 10.0
-        return p.strength - dist_penalty * 5
+        # Penalize tiny internal levels, then prefer the nearer pool at equal strength.
+        dist_penalty = 10.0 if dist <= 0.001 else 0.0
+        return (p.strength - dist_penalty * 5, -abs(p.price - current_price))
 
     candidates.sort(key=score, reverse=True)
     return candidates[:max_targets]
