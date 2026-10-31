@@ -99,7 +99,7 @@ def evaluate_turtle_soup(
     displacements: List[DisplacementEvent],
     liquidity_pools: List[LiquidityPool],
     atr: Optional[float] = None,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
 ) -> List[TurtleSoupSetup]:
     results: List[TurtleSoupSetup] = []
     ts = datetime.now(timezone.utc).isoformat()
