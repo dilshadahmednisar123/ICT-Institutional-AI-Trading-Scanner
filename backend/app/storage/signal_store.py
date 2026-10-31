@@ -11,14 +11,22 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 logger = logging.getLogger("ict_scanner.storage")
-BLOB_API = "https://blob.vercel-storage.com"
+BLOB_API = "https://vercel.com/api/blob"
 
 def _token() -> str:
     return os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
 
 def _headers() -> Dict[str, str]:
     token = _token()
-    return {"Authorization": f"Bearer {token}", "x-api-version": "7"}
+    parts = token.split("_")
+    store_id = parts[3] if len(parts) > 3 else ""
+    return {
+        "Authorization": f"Bearer {token}",
+        "x-api-version": "13",
+        "x-vercel-blob-store-id": store_id,
+        "x-api-blob-request-id": str(uuid.uuid4()),
+        "x-api-blob-request-attempt": "0",
+    }
 
 def _list_blobs(limit: int = 1000) -> List[Dict[str, Any]]:
     response = httpx.get(
@@ -45,6 +53,7 @@ def save_scan_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     headers = {
         **_headers(),
         "x-content-type": "application/json",
+        "x-vercel-blob-access": "private",
         "x-add-random-suffix": "0",
         "x-allow-overwrite": "0",
     }
