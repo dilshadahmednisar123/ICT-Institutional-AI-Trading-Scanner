@@ -146,6 +146,19 @@ jobs:
           grep -R --fixed-strings "https://liquidity-nexus-api-agus-902e.vercel.app" out >/dev/null
       - run: npx cap add android
       - run: npx cap sync android
+      - name: Set explicit Android package version
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+          text, code_count = re.subn(r"(?m)^\\s*versionCode\\s+\\d+", "        versionCode 1", text, count=1)
+          text, name_count = re.subn(r"(?m)^\\s*versionName\\s+['\\\"][^'\\\"]+['\\\"]", '        versionName "1.0.0"', text, count=1)
+          assert code_count == 1 and name_count == 1, "Could not set Android versionCode/versionName"
+          path.write_text(text)
+          print("Android package version set to 1.0.0 (versionCode 1)")
+          PY
       - name: Build Android release variant
         run: cd android && chmod +x gradlew && ./gradlew --no-daemon assembleRelease
       - name: Require persistent release-signing secrets
@@ -182,7 +195,7 @@ jobs:
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk"
           "$BUILD_TOOLS/zipalign" -c -v 4 "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk"
           "$BUILD_TOOLS/aapt" dump badging "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk" | tee "$RUNNER_TEMP/apk-badging.txt"
-          grep -q "package: name='com.liquiditynexus.app'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='com.liquiditynexus.app' versionCode='1' versionName='1.0.0'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "application-label:'LIQUIDITY NEXUS'" "$RUNNER_TEMP/apk-badging.txt"
           sha256sum "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk" | tee "$RUNNER_TEMP/apk-sha256.txt"
           rm -f "$KEYSTORE"
