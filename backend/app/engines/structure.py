@@ -43,6 +43,7 @@ def find_swing_points(
     """
     if len(df) < left + right + 1:
         return []
+    df = df.reset_index(drop=True)
 
     highs = df["high"].values
     lows = df["low"].values
@@ -139,6 +140,7 @@ def detect_bos_choch(
     events: List[StructureEvent] = []
     if len(swings) < 2 or len(df) < 5:
         return events
+    df = df.reset_index(drop=True)
 
     times = pd.to_datetime(df["timestamp"]) if "timestamp" in df.columns else df.index
     ordered = sorted(swings, key=lambda swing: swing.index)
