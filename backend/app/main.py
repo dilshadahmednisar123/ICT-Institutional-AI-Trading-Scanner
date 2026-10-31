@@ -21,7 +21,7 @@ from .scheduler.scanner import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ict_scanner")
 
-VERSION = "0.7.0-po3-smt-backtest"
+VERSION = "0.8.0-live-overlays"
 
 app = FastAPI(
     title="ICT Institutional AI Trading Scanner",
@@ -111,7 +111,7 @@ def get_ohlc(
     timeframe: str = Query("15M"),
     limit: int = Query(200, ge=10, le=2000),
 ):
-    provider = get_provider()
+    provider = get_provider("auto")
     df = provider.get_ohlc(symbol.upper(), timeframe, limit=limit)
     quality = provider.validate(df, symbol.upper(), timeframe)
     if not quality.is_valid or df is None or df.empty:
@@ -152,7 +152,7 @@ def backtest_symbol(
 def trigger_scan(req: ScanRequest):
     symbols = req.symbols or DEFAULT_SYMBOLS
     logger.info("Scan requested for %s @ %s", symbols, req.timeframe)
-    provider = get_provider("dukascopy")
+    provider = get_provider("auto")
     results = run_multi_symbol_scan(symbols, timeframe=req.timeframe, provider=provider)
 
     serialized = []
@@ -167,6 +167,8 @@ def trigger_scan(req: ScanRequest):
             "sessions": r.sessions,
             "in_silver_bullet_window": r.in_silver_bullet_window,
             "news_risk": getattr(r, "news_risk", "Unknown"),
+            "smt": getattr(r, "smt", None),
+            "chart_overlays": getattr(r, "chart_overlays", None),
             "setup_status": r.setup_status,
             "best_setup": r.best_setup,
             "model_setups": r.model_setups,
@@ -212,7 +214,7 @@ def system_status():
     return {
         "mode": "SIGNAL_ONLY",
         "version": VERSION,
-        "data_feed": "dukascopy_historical_placeholder + synthetic_fallback",
+        "data_feed": "auto (Twelve Data if TWELVE_DATA_API_KEY else Dukascopy/synthetic)",
         "scheduler": get_scheduler_status(),
         "engines_ready": ENGINES,
     }
