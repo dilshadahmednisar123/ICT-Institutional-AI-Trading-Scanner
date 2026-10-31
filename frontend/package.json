@@ -1,6 +1,6 @@
 {
   "name": "ict-institutional-scanner",
-  "version": "0.4.0",
+  "version": "0.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12,7 +12,8 @@
     "next": "14.2.15",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "clsx": "^2.1.1"
+    "clsx": "^2.1.1",
+    "lightweight-charts": "^4.2.1"
   },
   "devDependencies": {
     "@types/node": "^20.16.11",
