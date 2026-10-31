@@ -13,21 +13,19 @@ import logging
 from .engines.pipeline import analyze_symbol, run_multi_symbol_scan
 from .data.provider import get_provider
 from .scheduler.scanner import (
-    start_scheduler,
-    stop_scheduler,
-    pause_scheduler,
-    resume_scheduler,
-    get_scheduler_status,
-    trigger_manual_scan,
+    start_scheduler, stop_scheduler, pause_scheduler,
+    resume_scheduler, get_scheduler_status, trigger_manual_scan,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ict_scanner")
 
+VERSION = "0.6.0-ote-judas-news"
+
 app = FastAPI(
     title="ICT Institutional AI Trading Scanner",
     description="Signal-only ICT scanner. Selective. NO TRADE is preferred when conditions fail.",
-    version="0.4.0-sessions-scheduler",
+    version=VERSION,
 )
 
 app.add_middleware(
@@ -41,6 +39,14 @@ app.add_middleware(
 DEFAULT_SYMBOLS = [
     "EURUSD", "GBPUSD", "USDJPY", "XAUUSD",
     "AUDUSD", "USDCAD", "EURJPY", "GBPJPY",
+]
+
+ENGINES = [
+    "structure", "fvg", "liquidity", "displacement",
+    "premium_discount", "order_blocks", "entry_risk", "scoring",
+    "sessions", "news_filter",
+    "ict_2022", "silver_bullet", "unicorn", "turtle_soup", "ote", "judas",
+    "pipeline",
 ]
 
 
@@ -67,15 +73,11 @@ class SchedulerConfig(BaseModel):
 def root():
     return {
         "name": "ICT Institutional AI Trading Scanner",
-        "version": "0.4.0-sessions-scheduler",
+        "version": VERSION,
         "mode": "SIGNAL_ONLY",
         "philosophy": "NO VALID SETUP = NO TRADE",
         "docs": "/docs",
-        "engines": [
-            "structure", "fvg", "liquidity", "displacement",
-            "premium_discount", "order_blocks", "entry_risk",
-            "scoring", "sessions", "ict_2022", "silver_bullet", "pipeline",
-        ],
+        "engines": ENGINES,
     }
 
 
@@ -84,7 +86,7 @@ def health():
     return HealthResponse(
         status="ok",
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
-        version="0.4.0-sessions-scheduler",
+        version=VERSION,
     )
 
 
@@ -98,19 +100,55 @@ def list_instruments():
         "NZDJPY", "NZDCAD", "NZDCHF", "CADJPY", "CADCHF", "CHFJPY",
     ]
     metals = ["XAUUSD", "XAGUSD"]
+    return {"majors": majors, "minors": minors, "commodities": metals,
+            "total": len(majors) + len(minors) + len(metals)}
+
+
+@app.get("/api/v1/ohlc/{symbol}")
+def get_ohlc(
+    symbol: str,
+    timeframe: str = Query("15M"),
+    limit: int = Query(200, ge=10, le=2000),
+):
+    """OHLC series for charting (Lightweight Charts compatible)."""
+    provider = get_provider()
+    df = provider.get_ohlc(symbol.upper(), timeframe, limit=limit)
+    quality = provider.validate(df, symbol.upper(), timeframe)
+    if not quality.is_valid or df is None or df.empty:
+        return {"symbol": symbol, "timeframe": timeframe, "candles": [], "quality": asdict(quality)}
+
+    candles = []
+    for _, row in df.iterrows():
+        ts = row["timestamp"]
+        if hasattr(ts, "timestamp"):
+            t = int(ts.timestamp())
+        else:
+            t = int(pd_to_unix(ts))
+        candles.append({
+            "time": t,
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+        })
     return {
-        "majors": majors,
-        "minors": minors,
-        "commodities": metals,
-        "total": len(majors) + len(minors) + len(metals),
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        "candles": candles,
+        "quality": asdict(quality),
+        "provider": quality.provider,
     }
+
+
+def pd_to_unix(ts):
+    import pandas as pd
+    return pd.Timestamp(ts).timestamp()
 
 
 @app.post("/api/v1/scan")
 def trigger_scan(req: ScanRequest):
     symbols = req.symbols or DEFAULT_SYMBOLS
     logger.info("Scan requested for %s @ %s", symbols, req.timeframe)
-
     provider = get_provider("dukascopy")
     results = run_multi_symbol_scan(symbols, timeframe=req.timeframe, provider=provider)
 
@@ -125,6 +163,7 @@ def trigger_scan(req: ScanRequest):
             "premium_discount": r.premium_discount,
             "sessions": r.sessions,
             "in_silver_bullet_window": r.in_silver_bullet_window,
+            "news_risk": r.news_risk,
             "setup_status": r.setup_status,
             "best_setup": r.best_setup,
             "model_setups": r.model_setups,
@@ -145,59 +184,41 @@ def trigger_scan(req: ScanRequest):
     return {
         "status": "completed",
         "mode": "SIGNAL_ONLY",
-        "version": "0.4.0-sessions-scheduler",
+        "version": VERSION,
         "scanned": len(serialized),
         "confirmed": len(confirmed),
         "developing": len(developing),
         "no_setup": len(serialized) - len(confirmed) - len(developing),
         "results": serialized,
-        "message": "Analysis complete. Only CONFIRMED setups with valid RR are considered actionable (signal-only).",
+        "message": "Analysis complete. Only CONFIRMED setups with valid RR are actionable (signal-only).",
     }
 
 
 @app.get("/api/v1/analyze/{symbol}")
-def analyze_one(
-    symbol: str,
-    timeframe: str = Query("15M"),
-):
-    result = analyze_symbol(symbol.upper(), timeframe=timeframe)
-    return asdict(result)
+def analyze_one(symbol: str, timeframe: str = Query("15M")):
+    return asdict(analyze_symbol(symbol.upper(), timeframe=timeframe))
 
 
 @app.get("/api/v1/signals")
 def get_signals(status: Optional[str] = None):
-    return {
-        "signals": [],
-        "count": 0,
-        "message": "No persistent signal store yet. Use /api/v1/scan or scheduler.",
-    }
+    return {"signals": [], "count": 0, "message": "No persistent signal store yet."}
 
 
 @app.get("/api/v1/status")
 def system_status():
-    sched = get_scheduler_status()
     return {
         "mode": "SIGNAL_ONLY",
-        "version": "0.4.0-sessions-scheduler",
+        "version": VERSION,
         "data_feed": "dukascopy_historical_placeholder + synthetic_fallback",
-        "scheduler": sched,
-        "engines_ready": [
-            "structure", "fvg", "liquidity", "displacement",
-            "premium_discount", "order_blocks", "entry_risk",
-            "scoring", "sessions", "ict_2022", "silver_bullet", "pipeline",
-        ],
+        "scheduler": get_scheduler_status(),
+        "engines_ready": ENGINES,
     }
 
 
-# ---------- Scheduler controls ----------
-
 @app.post("/api/v1/scheduler/start")
 def scheduler_start(cfg: SchedulerConfig = SchedulerConfig()):
-    start_scheduler(
-        interval_minutes=cfg.interval_minutes,
-        symbols=cfg.symbols or DEFAULT_SYMBOLS,
-        timeframe=cfg.timeframe,
-    )
+    start_scheduler(interval_minutes=cfg.interval_minutes,
+                    symbols=cfg.symbols or DEFAULT_SYMBOLS, timeframe=cfg.timeframe)
     return {"status": "started", **get_scheduler_status()}
 
 
