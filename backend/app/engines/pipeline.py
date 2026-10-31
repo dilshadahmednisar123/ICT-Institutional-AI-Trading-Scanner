@@ -78,7 +78,7 @@ def analyze_symbol(
     timeframe: str = "15M",
     provider: Optional[BaseDataProvider] = None,
     limit: int = 400,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
 ) -> AnalysisResult:
     provider = provider or get_provider("auto")
     now = datetime.now(timezone.utc)
