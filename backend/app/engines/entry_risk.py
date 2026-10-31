@@ -5,7 +5,7 @@ Rules enforced:
 - Entry is never arbitrary.
 - Stop is always structural (beyond invalidation).
 - Take-profit is always a real liquidity pool.
-- RR is calculated mathematically; poor RR is rejected.
+- RR is calculated mathematically and reported; no minimum RR is imposed unless configured.
 """
 
 from __future__ import annotations
@@ -127,12 +127,12 @@ def build_trade_levels(
     liquidity_pools: List[LiquidityPool],
     atr: Optional[float] = None,
     spread: float = 0.0,
-    min_rr: float = 2.0,
+    min_rr: float = 0.0,
     entry_zone_low: Optional[float] = None,
     entry_zone_high: Optional[float] = None,
 ) -> TradeLevels:
     """
-    Construct complete trade levels and validate RR.
+    Construct complete trade levels; RR is reported and only filtered when min_rr > 0.
     """
     stop, buffer = calculate_structural_stop(
         direction=direction,
@@ -158,7 +158,7 @@ def build_trade_levels(
         tp3 = targets[2].price
         tp3_type = targets[2].kind
 
-    primary = tp2 or tp1  # prefer second meaningful target when available
+    primary = tp1 or tp2  # target the nearest highest-ranked opposing liquidity pool
 
     # Calculate risk / reward
     if direction == "BUY":
