@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: liquidity-nexus-api
+    runtime: docker
+    rootDir: backend
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ENABLE_SCHEDULER
+        value: "true"
+      - key: SCAN_INTERVAL_MINUTES
+        value: "20"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: liquidity-nexus-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: liquidity-nexus-redis
+          property: connectionString
+      - key: TWELVE_DATA_API_KEY
+        sync: false
+      - key: API_SECRET_KEY
+        generateValue: true
+  - type: redis
+    name: liquidity-nexus-redis
+    plan: starter
+    maxmemoryPolicy: noeviction
+databases:
+  - name: liquidity-nexus-db
+    plan: basic-256mb
+    databaseName: liquidity_nexus
+    user: liquidity_nexus
