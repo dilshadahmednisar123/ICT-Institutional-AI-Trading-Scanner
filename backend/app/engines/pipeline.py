@@ -1,6 +1,6 @@
 """
 Core Analysis Pipeline — multi-model ICT scanner
-Models: 2022, Silver Bullet, Unicorn, Turtle Soup, OTE, Judas
+Models: 2022, Silver Bullet, Unicorn, Turtle Soup, OTE, Judas, PO3 + SMT
 """
 
 from __future__ import annotations
@@ -22,9 +22,11 @@ from .models.unicorn import evaluate_unicorn, UnicornState
 from .models.turtle_soup import evaluate_turtle_soup, TSState
 from .models.ote import evaluate_ote, OTEState
 from .models.judas import evaluate_judas, JudasState
+from .models.po3 import evaluate_po3, PO3State
 from .scoring import score_setup
 from .sessions import session_score, is_in_silver_bullet_window, active_session_names
 from .news_filter import default_news_filter
+from .smt import detect_smt, DEFAULT_CORRELATIONS
 
 logger = logging.getLogger("ict_scanner.pipeline")
 
@@ -43,6 +45,8 @@ class AnalysisResult:
     sessions: List[str] = field(default_factory=list)
     in_silver_bullet_window: bool = False
     news_risk: str = "Unknown"
+    smt: Optional[Dict[str, Any]] = None
+    chart_overlays: Optional[Dict[str, Any]] = None
     fvgs: List[Dict[str, Any]] = field(default_factory=list)
     active_fvgs: List[Dict[str, Any]] = field(default_factory=list)
     liquidity_pools: List[Dict[str, Any]] = field(default_factory=list)
@@ -76,7 +80,7 @@ def analyze_symbol(
     limit: int = 400,
     min_rr: float = 2.0,
 ) -> AnalysisResult:
-    provider = provider or get_provider("dukascopy")
+    provider = provider or get_provider("auto")
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
 
@@ -98,6 +102,16 @@ def analyze_symbol(
         sess_score = session_score(now)
         news = default_news_filter.evaluate(symbol, now)
 
+        # SMT vs correlated pair when available
+        corr_sym = DEFAULT_CORRELATIONS.get(symbol.upper())
+        df_corr = None
+        if corr_sym:
+            try:
+                df_corr = provider.get_ohlc(corr_sym, timeframe, limit=limit)
+            except Exception:
+                df_corr = None
+        smt = detect_smt(symbol, df, df_corr, corr_sym)
+
         swings = find_swing_points(df, left=3, right=3, strength="short")
         structure = classify_structure(swings)
         bos_events = detect_bos_choch(df, swings, timeframe=timeframe)
@@ -115,22 +129,24 @@ def analyze_symbol(
         active_obs = get_active_order_blocks(order_blocks, current_price)
         bias = structure.get("bias", "neutral")
 
-        # Models
         m2022 = evaluate_ict_2022(symbol, current_price, bias, sweeps, displacements, fvgs, order_blocks, pools, dealing, pd_class, atr, min_rr)
         msb = evaluate_silver_bullet(symbol, current_price, bias, sweeps, displacements, fvgs, pools, atr, min_rr, now)
         muni = evaluate_unicorn(symbol, current_price, bias, sweeps, displacements, fvgs, order_blocks, pools, atr, min_rr)
         mts = evaluate_turtle_soup(symbol, current_price, bias, sweeps, displacements, pools, atr, min_rr)
         mote = evaluate_ote(symbol, current_price, bias, dealing, sweeps, displacements, fvgs, pools, atr, min_rr)
         mjud = evaluate_judas(symbol, current_price, bias, sweeps, displacements, pools, atr, min_rr, now)
+        mpo3 = evaluate_po3(symbol, current_price, bias, df, sweeps, displacements, pools, atr, min_rr)
 
         scored: List[Dict[str, Any]] = []
         best = None
         best_score = -1.0
+        smt_bonus = smt.score if smt.available and smt.divergence else 0.0
 
         def consider(d: Dict[str, Any], score: float, ok_states: set):
             nonlocal best, best_score
-            # News blackout cannot create a signal; it can only block CONFIRMED promotion
-            if news.blocking and d.get("state") in ok_states and "CONFIRMED" in str(d.get("state", "")).upper():
+            score = min(100.0, score + smt_bonus * 0.8)
+            d["score"] = round(score, 1)
+            if news.blocking and "CONFIRMED" in str(d.get("state", "")).upper():
                 d["notes"] = (d.get("notes") or []) + [news.message]
                 d["setup_status"] = "DEVELOPING"
             scored.append(d)
@@ -140,7 +156,7 @@ def analyze_symbol(
                 best = d
 
         for s in m2022:
-            bd = score_setup(s, has_mss=bool(bos_events), session_score=sess_score)
+            bd = score_setup(s, has_mss=bool(bos_events), session_score=sess_score, smt_score=smt_bonus)
             s.score = bd.total
             s.notes.extend(bd.notes)
             d = s.to_dict()
@@ -152,37 +168,34 @@ def analyze_symbol(
                 continue
             d = s.to_dict()
             sc = min(100.0, 55 + sess_score * 5 + (15 if s.state == SBState.CONFIRMED else 0))
-            d["score"] = sc
             consider(d, sc, {SBState.CONFIRMED.value, SBState.ENTRY_READY.value, SBState.FVG_READY.value})
 
         for s in muni:
             d = s.to_dict()
-            sc = {UnicornState.CONFIRMED: 88, UnicornState.ENTRY_READY: 74, UnicornState.FVG_CONFLUENCE: 66}.get(s.state, 45)
-            d["score"] = float(sc)
-            consider(d, float(sc), {UnicornState.CONFIRMED.value, UnicornState.ENTRY_READY.value, UnicornState.FVG_CONFLUENCE.value})
+            sc = float({UnicornState.CONFIRMED: 88, UnicornState.ENTRY_READY: 74, UnicornState.FVG_CONFLUENCE: 66}.get(s.state, 45))
+            consider(d, sc, {UnicornState.CONFIRMED.value, UnicornState.ENTRY_READY.value, UnicornState.FVG_CONFLUENCE.value})
 
         for s in mts:
             d = s.to_dict()
-            sc = {TSState.CONFIRMED: 82, TSState.ENTRY_READY: 70, TSState.DISPLACEMENT: 63}.get(s.state, 40)
-            d["score"] = float(sc)
-            consider(d, float(sc), {TSState.CONFIRMED.value, TSState.ENTRY_READY.value, TSState.DISPLACEMENT.value})
+            sc = float({TSState.CONFIRMED: 82, TSState.ENTRY_READY: 70, TSState.DISPLACEMENT: 63}.get(s.state, 40))
+            consider(d, sc, {TSState.CONFIRMED.value, TSState.ENTRY_READY.value, TSState.DISPLACEMENT.value})
 
         for s in mote:
             d = s.to_dict()
-            sc = {OTEState.CONFIRMED: 84, OTEState.IN_OTE_ZONE: 68, OTEState.RANGE_OK: 40}.get(s.state, 30)
-            d["score"] = float(sc)
-            consider(d, float(sc), {OTEState.CONFIRMED.value, OTEState.IN_OTE_ZONE.value})
+            sc = float({OTEState.CONFIRMED: 84, OTEState.IN_OTE_ZONE: 68, OTEState.RANGE_OK: 40}.get(s.state, 30))
+            consider(d, sc, {OTEState.CONFIRMED.value, OTEState.IN_OTE_ZONE.value})
 
         for s in mjud:
             d = s.to_dict()
-            sc = {JudasState.CONFIRMED: 86, JudasState.REVERSAL: 72, JudasState.FALSE_MOVE: 55}.get(s.state, 35)
+            sc = float({JudasState.CONFIRMED: 86, JudasState.REVERSAL: 72, JudasState.FALSE_MOVE: 55}.get(s.state, 35))
             if s.session and s.session != "off_session":
                 sc += 5
-            d["score"] = float(min(100, sc))
-            consider(d, float(sc), {JudasState.CONFIRMED.value, JudasState.REVERSAL.value})
+            consider(d, sc, {JudasState.CONFIRMED.value, JudasState.REVERSAL.value})
 
-        confirmed = sum(1 for d in scored if d.get("setup_status") == "CONFIRMED" or d.get("state", "").endswith("CONFIRMED") or d.get("state") == "CONFIRMED")
-        developing = sum(1 for d in scored if d.get("setup_status") == "DEVELOPING")
+        for s in mpo3:
+            d = s.to_dict()
+            sc = float({PO3State.CONFIRMED: 87, PO3State.DISTRIBUTION: 73, PO3State.MANIPULATION: 60, PO3State.ACCUMULATION: 40}.get(s.state, 30))
+            consider(d, sc, {PO3State.CONFIRMED.value, PO3State.DISTRIBUTION.value, PO3State.MANIPULATION.value})
 
         notes: List[str] = []
         status: Literal["NO_SETUP", "DEVELOPING", "CONFIRMED", "INVALIDATED"] = "NO_SETUP"
@@ -193,7 +206,7 @@ def analyze_symbol(
             else:
                 status = "CONFIRMED"
                 notes.append("CONFIRMED setup(s) present")
-        elif developing or any("DEVELOPING" in str(d.get("setup_status")) or d.get("state") not in ("IDLE", "OUTSIDE_WINDOW", "INVALIDATED", "") for d in scored):
+        elif any(d.get("setup_status") == "DEVELOPING" or d.get("state") not in ("IDLE", "OUTSIDE_WINDOW", "INVALIDATED", "", "RANGE_OK", "ACCUMULATION") for d in scored):
             status = "DEVELOPING"
             notes.append("Developing setup(s) — not executable")
         else:
@@ -203,6 +216,29 @@ def analyze_symbol(
             notes.append(f"Inside Silver Bullet window: {sb_label}")
         if not news.available:
             notes.append(news.message)
+        if smt.available and smt.divergence:
+            notes.append(f"SMT {smt.divergence}: {smt.detail}")
+        elif not smt.available:
+            notes.append(smt.detail)
+
+        # Chart overlays for frontend
+        overlays: Dict[str, Any] = {
+            "fvgs": [_ser_fvg(f) for f in active[:3]],
+            "order_blocks": [_ser_ob(o) for o in active_obs[:3]],
+            "liquidity": [_ser_pool(p) for p in pools[:6]],
+            "dealing_range": {
+                "high": dealing.high, "low": dealing.low, "eq": dealing.equilibrium,
+            } if dealing else None,
+        }
+        if best and best.get("levels"):
+            lv = best["levels"]
+            overlays["trade"] = {
+                "entry": lv.get("entry"),
+                "stop": lv.get("stop_loss"),
+                "tp1": lv.get("tp1"),
+                "tp2": lv.get("tp2"),
+                "direction": best.get("direction"),
+            }
 
         return AnalysisResult(
             symbol=symbol, timeframe=timeframe, timestamp_utc=now_iso,
@@ -213,6 +249,7 @@ def analyze_symbol(
             } if dealing else None,
             premium_discount=pd_class, swings_count=len(swings),
             sessions=sessions, in_silver_bullet_window=in_sb, news_risk=news.risk,
+            smt=smt.to_dict(), chart_overlays=overlays,
             fvgs=[_ser_fvg(f) for f in fvgs[-6:]],
             active_fvgs=[_ser_fvg(f) for f in active[:4]],
             liquidity_pools=[_ser_pool(p) for p in pools[:10]],
@@ -237,5 +274,5 @@ def run_multi_symbol_scan(
     timeframe: str = "15M",
     provider: Optional[BaseDataProvider] = None,
 ) -> List[AnalysisResult]:
-    provider = provider or get_provider()
+    provider = provider or get_provider("auto")
     return [analyze_symbol(sym, timeframe, provider=provider) for sym in symbols]
