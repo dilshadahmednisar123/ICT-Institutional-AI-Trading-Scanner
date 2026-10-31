@@ -1,4 +1,4 @@
-name: Liquidity Nexus CI & Android Release
+name: Liquidity Nexus CI, Production Scan & Android Release
 on:
   push:
     branches: [main]
@@ -8,14 +8,21 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '*/20 * * * *'
+
 permissions:
   contents: write
   actions: read
+
+concurrency:
+  group: liquidity-nexus-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   backend:
     if: github.event_name != 'schedule'
-    name: Backend validation
+    name: Backend validation and production acceptance
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -28,7 +35,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app
-      - name: API smoke test
+      - name: Backend unit smoke tests
         run: |
           python - <<'PY'
           from fastapi.testclient import TestClient
@@ -40,41 +47,72 @@ jobs:
           instruments = client.get("/api/v1/instruments")
           assert instruments.status_code == 200
           assert instruments.json()["total"] >= 20
+          assert client.get("/api/v1/status").status_code == 200
           print("Backend API smoke tests passed")
           PY
-      - name: Production market-data and persistent-history acceptance test
+      - name: Production market-data and persistent-history acceptance
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           BASE="https://liquidity-nexus-api-agus-902e.vercel.app"
-          for attempt in $(seq 1 24); do
-            if curl --fail --silent --show-error --max-time 20 "$BASE/health" -o health.json; then break; fi
-            sleep 10
-          done
-          python -c "import json; d=json.load(open('health.json')); assert d, d"
+          curl --fail --silent --show-error --retry 5 --retry-delay 10 --max-time 30 "$BASE/health" -o health.json
+          curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/storage/health" -o storage.json
+          python - <<'PY'
+          import json
+          health=json.load(open("health.json"))
+          storage=json.load(open("storage.json"))
+          assert health.get("status") == "ok", health
+          assert storage.get("available") is True, storage
+          print("Production health and Blob storage passed:", storage)
+          PY
           for symbol in EURUSD XAUUSD; do
-            curl --fail --silent --show-error --retry 3 --max-time 40 "$BASE/api/v1/ohlc/$symbol" -o "$symbol.json"
-            python -c "import json,sys; d=json.load(open(sys.argv[1])); assert d, d; print(sys.argv[1], 'market payload received')" "$symbol.json"
+            curl --fail --silent --show-error --retry 3 --retry-delay 5 --max-time 45 "$BASE/api/v1/ohlc/$symbol?timeframe=15M&limit=100" -o "$symbol.json"
+            python - "$symbol.json" "$symbol" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          assert d.get("symbol") == sys.argv[2], d
+          assert len(d.get("candles",[])) >= 10, (sys.argv[2], d.get("quality"))
+          q=d.get("quality",{})
+          assert q.get("provider") and q.get("last_timestamp"), q
+          print(sys.argv[2], "candles:", len(d["candles"]), "stale:", q.get("stale"), "provider:", q.get("provider"))
+          PY
           done
-          persisted=0
-          for attempt in $(seq 1 12); do
-            code=$(curl --location --post301 --post302 --post303 --silent --show-error --max-time 120 \
-              --write-out "%{http_code}" -X POST "$BASE/api/v1/scan" \
+          curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/signals?limit=100" -o history-before.json
+          python - <<'PY'
+          import json
+          d=json.load(open("history-before.json"))
+          assert "signals" in d and "count" in d, d
+          print("Existing history records:", d["count"])
+          PY
+          for pass in 1 2; do
+            curl --fail --silent --show-error --max-time 180 -X POST "$BASE/api/v1/scan" \
               -H "Content-Type: application/json" \
-              -d '{"symbols":["EURUSD"],"timeframe":"15M"}' -o scan.json || true)
-            if [ "$code" = "200" ] && python -c "import json; d=json.load(open('scan.json')); assert d.get('persistence',{}).get('stored') is True" 2>/dev/null; then
-              persisted=1
-              break
-            fi
-            sleep 15
+              -d '{"symbols":["EURUSD","XAUUSD"],"timeframe":"15M"}' -o "scan-$pass.json"
+            python - "scan-$pass.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          assert d.get("status") == "completed", d
+          assert d.get("scanned") == 2, d
+          assert d.get("persistence",{}).get("stored") is True, d.get("persistence")
+          for item in d.get("results",[]):
+              assert item.get("data_quality") is not None, item
+          print("Production scan pass persisted:", d.get("scanned"), "results; confirmed:", d.get("confirmed"))
+          PY
           done
-          test "$persisted" = "1" || { cat scan.json || true; echo "Production scan did not persist"; exit 1; }
-          curl --fail --silent --show-error --retry 3 --max-time 40 "$BASE/api/v1/signals?limit=1" -o history.json
-          python -c "import json; d=json.load(open('history.json')); assert d.get('count',0) >= 1, d; print('Production scan persistence and readback passed')"
-  android:
-    if: github.event_name != 'schedule'
-    name: Build signed Android release APK
+          curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/signals?limit=100" -o history-after.json
+          python - <<'PY'
+          import json
+          before=json.load(open("history-before.json"))
+          after=json.load(open("history-after.json"))
+          assert after.get("count",0) >= before.get("count",0)+2, {"before":before.get("count"),"after":after.get("count")}
+          print("Blob history readback after two subsequent scans passed:", after["count"])
+          PY
+
+  android-release:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    name: Build and verify signed Android release APK
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: frontend
@@ -83,55 +121,79 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      - name: Require persistent release-signing secrets
+        env:
+          ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_SIGNING_KEYSTORE_BASE64" || { echo "::error::Missing repository secret ANDROID_SIGNING_KEYSTORE_BASE64"; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "::error::Missing repository secret ANDROID_KEYSTORE_PASSWORD"; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo "::error::Missing repository secret ANDROID_KEY_ALIAS"; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo "::error::Missing repository secret ANDROID_KEY_PASSWORD"; exit 1; }
       - name: Install Android SDK packages
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
         run: |
+          set -euo pipefail
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
           test -n "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null
           "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-      - run: npm install
+      - name: Install dependencies
+        run: npm ci
       - name: Build production web app for Android
         env:
           NEXT_PUBLIC_API_URL: https://liquidity-nexus-api-agus-902e.vercel.app
-        run: npm run build
+        run: |
+          set -euo pipefail
+          npm run build
+          test -d out
+          grep -R --fixed-strings "https://liquidity-nexus-api-agus-902e.vercel.app" out >/dev/null
       - run: npx cap add android
       - run: npx cap sync android
       - name: Build Android release variant
-        run: cd android && chmod +x gradlew && ./gradlew assembleRelease
-      - name: Align and sign release APK
+        run: cd android && chmod +x gradlew && ./gradlew --no-daemon assembleRelease
+      - name: Sign, verify package metadata and integrity
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          KEYSTORE="$RUNNER_TEMP/liquidity-nexus-release.jks"
           test -s "$UNSIGNED"
-          STORE_PASSWORD="$(openssl rand -hex 24)"
-          KEY_PASSWORD="$(openssl rand -hex 24)"
-          keytool -genkeypair -v -keystore "$RUNNER_TEMP/liquidity-nexus-release.jks" \
-            -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" -alias liquidity-nexus \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=LIQUIDITY NEXUS, OU=Android, O=LIQUIDITY NEXUS, L=Aluva, ST=Kerala, C=IN"
+          printf '%s' "$ANDROID_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          test -s "$KEYSTORE"
           "$BUILD_TOOLS/zipalign" -f -v 4 "$UNSIGNED" "$RUNNER_TEMP/liquidity-nexus-aligned.apk"
-          "$BUILD_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/liquidity-nexus-release.jks" \
-            --ks-key-alias liquidity-nexus --ks-pass "pass:$STORE_PASSWORD" \
-            --key-pass "pass:$KEY_PASSWORD" --out "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk" \
-            "$RUNNER_TEMP/liquidity-nexus-aligned.apk"
+          "$BUILD_TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk" "$RUNNER_TEMP/liquidity-nexus-aligned.apk"
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk"
           "$BUILD_TOOLS/zipalign" -c -v 4 "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk"
-          sha256sum "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk"
+          "$BUILD_TOOLS/aapt" dump badging "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk" | tee "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='com.liquiditynexus.app'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "application-label:'LIQUIDITY NEXUS'" "$RUNNER_TEMP/apk-badging.txt"
+          sha256sum "$RUNNER_TEMP/LIQUIDITY-NEXUS-release.apk" | tee "$RUNNER_TEMP/apk-sha256.txt"
+          rm -f "$KEYSTORE"
       - uses: actions/upload-artifact@v4
         with:
-          name: liquidity-nexus-release-apk
+          name: liquidity-nexus-signed-release-apk
           path: ${{ runner.temp }}/LIQUIDITY-NEXUS-release.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
       - name: Publish signed APK to GitHub Release
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
@@ -142,12 +204,17 @@ jobs:
           prerelease: true
           overwrite_files: true
           files: ${{ runner.temp }}/LIQUIDITY-NEXUS-release.apk
+
   scheduled-scan:
-    name: Scheduled live market scan
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    name: Execute and verify 20-minute production scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Trigger and verify production ICT scan persistence
+      - name: Verify main branch schedule context
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main" || { echo "Scheduled/manual production scans must run from main"; exit 1; }
+      - name: Run production ICT scan and verify persistence
         run: |
           set -euo pipefail
           BASE="https://liquidity-nexus-api-agus-902e.vercel.app"
@@ -156,10 +223,22 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"symbols":["EURUSD","GBPUSD","USDJPY","XAUUSD","AUDUSD","USDCAD"],"timeframe":"15M"}' \
             -o scan-results.json
-          python -c "import json; d=json.load(open('scan-results.json')); assert d.get('persistence',{}).get('stored') is True, d.get('persistence'); print('Scheduled scan persisted:', d.get('scanned'))"
-          curl --fail --silent --show-error --retry 3 --max-time 40 "$BASE/api/v1/signals?limit=1" -o history.json
-          python -c "import json; d=json.load(open('history.json')); assert d.get('count',0) >= 1, d; print('Scheduled scan history readback passed')"
-          cat scan-results.json
+          python - <<'PY'
+          import json
+          d=json.load(open("scan-results.json"))
+          assert d.get("status") == "completed", d
+          assert d.get("scanned") == 6, d
+          assert d.get("persistence",{}).get("stored") is True, d.get("persistence")
+          print("Scheduled scan completed and persisted:", d.get("scanned"), "instruments")
+          print("Confirmed:", d.get("confirmed"), "Developing:", d.get("developing"), "No setup:", d.get("no_setup"))
+          PY
+          curl --fail --silent --show-error --retry 3 --max-time 40 "$BASE/api/v1/signals?limit=100" -o history.json
+          python - <<'PY'
+          import json
+          d=json.load(open("history.json"))
+          assert d.get("count",0) >= 1, d
+          print("Persistent history available:", d["count"], "records")
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: scheduled-ict-scan-results
