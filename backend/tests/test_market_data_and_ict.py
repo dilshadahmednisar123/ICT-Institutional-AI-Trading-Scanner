@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
+import app.data.provider as provider_module
 from app.data.provider import (
     AutoDataProvider,
     BaseDataProvider,
@@ -13,6 +14,7 @@ from app.engines.liquidity import LiquidityPool, detect_equal_levels, detect_swe
 from app.engines.fvg import detect_fvgs
 from app.engines.premium_discount import build_dealing_range
 from app.engines.entry_risk import build_trade_levels
+from app.engines.pipeline import analyze_symbol
 
 
 class StubProvider(BaseDataProvider):
@@ -144,6 +146,41 @@ def test_structural_stop_and_opposing_liquidity_target_rr():
     assert levels.valid
     assert levels.stop_loss < levels.entry_price < levels.primary_tp
     assert levels.risk_reward > 0
+
+
+
+def test_timeframe_misaligned_candles_are_rejected():
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    frame = pd.DataFrame([candle(now + timedelta(minutes=1), 1.1, 1.101, 1.099, 1.1)])
+    report = StubProvider().validate(frame, "EURUSD", "15M")
+    assert not report.is_valid
+    assert report.misaligned_candles == 1
+    assert report.market_status == "invalid"
+
+
+def test_market_closed_blocks_even_recent_candle_setups(monkeypatch):
+    fixed_now = datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now if tz else fixed_now.replace(tzinfo=None)
+
+    monkeypatch.setattr(provider_module, "datetime", FrozenDateTime)
+    rows = []
+    for i in range(100):
+        ts = fixed_now - timedelta(minutes=15 * (100 - i))
+        rows.append(candle(ts, 1.1, 1.101, 1.099, 1.1))
+    frame = pd.DataFrame(rows)
+
+    class RecentHistoricalProvider(StubProvider):
+        def get_ohlc(self, symbol, timeframe, start=None, end=None, limit=500):
+            return frame
+
+    result = analyze_symbol("EURUSD", timeframe="15M", provider=RecentHistoricalProvider())
+    assert result.setup_status == "NO_SETUP"
+    assert result.data_quality["market_status"] == "market_closed"
+    assert any("MARKET CLOSED" in note for note in result.notes)
 
 
 def test_bos_is_close_confirmed_after_confirmed_swing():
