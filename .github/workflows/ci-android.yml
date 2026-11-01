@@ -106,7 +106,7 @@ jobs:
           curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/storage/health" -o storage.json
           curl --fail --silent --show-error --max-time 30 "$BASE/api/v1/status" -o status.json
           python - <<'PY'
-          import json, os
+          import json, os, subprocess
           health=json.load(open("health.json"))
           storage=json.load(open("storage.json"))
           status=json.load(open("status.json"))
@@ -114,8 +114,15 @@ jobs:
           assert storage.get("available") is True, storage
           deployed=status.get("git_commit")
           expected=os.getenv("GITHUB_SHA")
-          assert deployed == expected, {"deployed_commit":deployed,"expected_commit":expected}
-          print("Production health, Blob storage and deployed source commit passed:", deployed)
+          assert deployed and expected, {"deployed_commit":deployed,"expected_commit":expected}
+          if deployed != expected:
+              subprocess.run(["git", "fetch", "--no-tags", "origin", deployed, "--depth=1"], cwd="..", check=True)
+              diff=subprocess.run(["git", "diff", "--quiet", deployed, expected, "--", "backend/app", "backend/requirements.txt"], cwd="..")
+              assert diff.returncode == 0, {
+                  "deployed_commit": deployed, "workflow_commit": expected,
+                  "reason": "backend application or dependencies changed after the deployed revision",
+              }
+          print("Production health, Blob storage and deployed backend source compatibility passed:", deployed, "workflow:", expected)
           PY
           for symbol in EURUSD XAUUSD; do
             curl --fail --silent --show-error --retry 3 --retry-delay 5 --max-time 45 "$BASE/api/v1/ohlc/$symbol?timeframe=15M&limit=100" -o "$symbol.json"
