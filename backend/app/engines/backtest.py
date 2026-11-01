@@ -60,6 +60,7 @@ class BacktestReport:
     max_consecutive_losses: int = 0
     max_drawdown_r: float = 0.0
     gaps_detected: int = 0
+    session_breaks: int = 0
     missing_candles: int = 0
     duplicate_candles: int = 0
     data_provider: str = "unavailable"
@@ -83,6 +84,7 @@ class BacktestReport:
             "max_consecutive_losses": self.max_consecutive_losses,
             "max_drawdown_r": round(self.max_drawdown_r, 3),
             "gaps_detected": self.gaps_detected,
+            "session_breaks": self.session_breaks,
             "missing_candles": self.missing_candles,
             "duplicate_candles": self.duplicate_candles,
             "data_provider": self.data_provider,
@@ -247,6 +249,18 @@ def run_backtest(
                 return report
             diffs = df["timestamp"].diff().dropna()
             gap_mask = (diffs > pd.Timedelta(minutes=minutes * 1.5)) & (diffs <= pd.Timedelta(hours=6))
+            if symbol.upper() in ("XAUUSD", "XAU/USD") and timeframe.upper() == "15M":
+                # Dukascopy XAU/USD has a scheduled 1-hour daily maintenance break.
+                # Candle-start timestamps therefore have a 75-minute delta at 22:00 UTC
+                # in summer or 23:00 UTC in winter; classify it as a session break.
+                next_timestamps = df["timestamp"].iloc[1:]
+                expected_gold_break = (
+                    (diffs == pd.Timedelta(minutes=75)) &
+                    next_timestamps.dt.hour.isin([22, 23]) &
+                    (next_timestamps.dt.minute == 0)
+                )
+                report.session_breaks = int(expected_gold_break.sum())
+                gap_mask = gap_mask & ~expected_gold_break
             report.gaps_detected = int(gap_mask.sum())
             report.missing_candles = sum(
                 max(1, int(round(delta.total_seconds() / (minutes * 60))) - 1)
