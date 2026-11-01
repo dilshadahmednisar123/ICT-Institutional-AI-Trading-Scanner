@@ -206,14 +206,13 @@ export default function Dashboard() {
       </section>
 
       <section className="card">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div><div className="font-semibold">SCAN EXECUTION</div><div className="text-xs text-institutional-muted mt-1">Progress is reported by the backend; the dashboard does not simulate scheduled activity.</div></div>
-          <span className="text-xs text-institutional-muted">{scanner?.scanning ? "RUNNING" : loading ? "MANUAL REQUEST RUNNING" : "IDLE"}</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+          <div><div className="font-semibold">SCAN EXECUTION STATUS</div><div className="text-xs text-institutional-muted mt-1">Instrument totals update from completed backend scans. No estimated progress is displayed.</div></div>
+          <span className={scanner?.scanning || loading ? "text-xs font-semibold text-cyan-300" : "text-xs text-institutional-muted"}>{scanner?.scanning ? "BACKEND SCAN RUNNING" : loading ? "MANUAL REQUEST PENDING" : "IDLE"}</span>
         </div>
-        <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className={scanner?.scanning || loading ? "h-full bg-cyan-400 w-1/2 animate-pulse" : "h-full bg-cyan-400 w-full opacity-50"} /></div>
-        <div className="flex justify-between text-[11px] text-institutional-muted mt-2">
-          <span>{scanner?.scanning || loading ? "Scan request in progress" : "Last completed scan"} </span>
-          <span>{formatTime(scanner?.last_scan_utc)}</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <span className="text-institutional-muted">Latest completed run</span>
+          <span className="font-medium tabular-nums">{scanner?.scanned ?? results.length} instruments · {formatTime(scanner?.last_scan_utc)}</span>
         </div>
       </section>
 
