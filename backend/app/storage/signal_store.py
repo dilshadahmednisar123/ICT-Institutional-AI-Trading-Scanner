@@ -111,6 +111,14 @@ def get_recent_signals(limit: int = 100, status: Optional[str] = None) -> List[D
             snapshot = response.json()
             scanned_at = snapshot.get("timestamp_utc")
             for result in snapshot.get("results", []):
+                quality = result.get("data_quality") or {}
+                provider = str(quality.get("provider") or "")
+                # Do not surface legacy Yahoo/GC futures or unknown-provider records
+                # as current production history. Preserve only the approved Twelve Data
+                # feed and explicit DATA UNAVAILABLE records; raw Blob snapshots remain intact.
+                approved_provider = provider.startswith("TwelveDataProvider") or provider.startswith("DATA UNAVAILABLE")
+                if not approved_provider:
+                    continue
                 if status and str(result.get("setup_status", "")).upper() != status.upper():
                     continue
                 output.append({**result, "scan_timestamp_utc": scanned_at})
