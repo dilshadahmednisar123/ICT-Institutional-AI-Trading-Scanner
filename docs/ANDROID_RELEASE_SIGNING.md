@@ -17,6 +17,8 @@ Use a strong unique keystore password and key password. Do not reuse passwords f
 
 ## Configure GitHub Actions secrets
 
+Direct settings link: https://github.com/dilshadahmednisar123/ICT-Institutional-AI-Trading-Scanner/settings/secrets/actions
+
 In the repository, open **Settings → Secrets and variables → Actions → New repository secret** and add:
 
 | Secret name | Value |
@@ -42,6 +44,6 @@ Paste the output directly into the GitHub secret value field. Do not put it in a
 
 ## Build and verification
 
-A push to `main` or a manual workflow dispatch builds the production web bundle using the configured production API URL, packages it with Capacitor, builds `assembleRelease`, signs it with the persistent keystore, verifies the APK signature and zip alignment, checks package ID `com.liquiditynexus.app`, and publishes the APK as a GitHub Actions artifact. Main-branch pushes also update the `android-latest` prerelease.
+After all four secrets are saved, open **Actions → Liquidity Nexus CI, Production Scan & Android Release → Run workflow**, select branch `main`, and run it. A manual workflow dispatch from `main` builds the production web bundle using the configured production API URL, packages it with Capacitor, builds `assembleRelease`, signs it with the persistent keystore, verifies the APK signature and zip alignment, checks package ID `com.liquiditynexus.app`, and publishes the signed APK as a GitHub Actions artifact and updates the `android-latest` prerelease. Version tags beginning with `v` also build and publish a versioned release.
 
 The signing key must be preserved for every future release. Losing it means existing installations cannot receive in-place signed updates.
