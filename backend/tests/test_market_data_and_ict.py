@@ -4,6 +4,7 @@ import pandas as pd
 
 import app.data.provider as provider_module
 import app.engines.backtest as backtest_module
+import app.storage.signal_store as signal_store
 from app.data.provider import (
     AutoDataProvider,
     BaseDataProvider,
@@ -608,3 +609,52 @@ def test_xauusd_spot_is_not_marked_closed_by_the_fx_weekend_calendar(monkeypatch
     report = StubProvider().validate(frame, "XAUUSD", "15M")
     assert report.market_status == "open_or_recent"
     assert not report.stale
+
+
+def test_signal_history_excludes_legacy_yahoo_and_gc_futures_records(monkeypatch):
+    snapshots = {
+        "blob-legacy": {
+            "timestamp_utc": "2026-10-31T00:00:00Z",
+            "results": [
+                {"symbol": "XAUUSD", "setup_status": "NO_SETUP",
+                 "data_quality": {"provider": "YahooFinanceProvider (GC=F gold futures proxy)"}}
+            ],
+        },
+        "blob-current": {
+            "timestamp_utc": "2026-11-01T00:00:00Z",
+            "results": [
+                {"symbol": "EURUSD", "setup_status": "NO_SETUP",
+                 "data_quality": {"provider": "DATA UNAVAILABLE (licensed provider not configured)"}},
+                {"symbol": "XAUUSD", "setup_status": "NO_SETUP",
+                 "data_quality": {"provider": "TwelveDataProvider (XAU/USD spot reference; not broker-specific)"}},
+            ],
+        },
+    }
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    monkeypatch.setattr(signal_store, "_token", lambda: "configured")
+    monkeypatch.setattr(signal_store, "_headers", lambda: {})
+    monkeypatch.setattr(signal_store, "_list_blobs", lambda: [
+        {"pathname": "signals/current.json", "url": "blob-current", "uploadedAt": "2026-11-01"},
+        {"pathname": "signals/legacy.json", "url": "blob-legacy", "uploadedAt": "2026-10-31"},
+    ])
+    monkeypatch.setattr(
+        signal_store.httpx, "get",
+        lambda url, **kwargs: FakeResponse(snapshots[url]),
+    )
+
+    rows = signal_store.get_recent_signals(limit=10)
+    assert {row["symbol"] for row in rows} == {"EURUSD", "XAUUSD"}
+    assert all(
+        row["data_quality"]["provider"].startswith(("TwelveDataProvider", "DATA UNAVAILABLE"))
+        for row in rows
+    )
