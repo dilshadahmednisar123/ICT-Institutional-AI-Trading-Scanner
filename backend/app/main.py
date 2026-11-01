@@ -2,7 +2,7 @@
 ICT Institutional AI Trading Scanner — FastAPI entry point
 """
 
-from fastapi import FastAPI, Query, Depends
+from fastapi import FastAPI, Query, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -15,7 +15,7 @@ from .engines.pipeline import analyze_symbol, run_multi_symbol_scan
 from .engines.backtest import run_backtest
 from .data.provider import get_provider
 from .core.auth import require_api_key, api_key_enabled
-from .storage.signal_store import save_scan_results, get_recent_signals, storage_health
+from .storage.signal_store import save_scan_results, get_recent_signals, get_recent_scans, storage_health
 from .scheduler.scanner import (
     start_scheduler, stop_scheduler, pause_scheduler,
     resume_scheduler, get_scheduler_status, trigger_manual_scan,
@@ -173,7 +173,7 @@ def backtest_symbol(
 
 
 @app.post("/api/v1/scan")
-def trigger_scan(req: ScanRequest, _: None = Depends(require_api_key)):
+def trigger_scan(req: ScanRequest, x_scan_source: str = Header("manual", alias="X-Scan-Source"), x_github_run_id: Optional[str] = Header(None, alias="X-GitHub-Run-Id"), _: None = Depends(require_api_key)):
     symbols = req.symbols or DEFAULT_SYMBOLS
     logger.info("Scan requested for %s @ %s", symbols, req.timeframe)
     provider = get_provider("auto")
@@ -207,7 +207,7 @@ def trigger_scan(req: ScanRequest, _: None = Depends(require_api_key)):
             "error": r.error,
         })
 
-    persistence = save_scan_results(serialized)
+    persistence = save_scan_results(serialized, source=x_scan_source, workflow_run_id=x_github_run_id)
     confirmed = [s for s in serialized if s["setup_status"] == "CONFIRMED"]
     developing = [s for s in serialized if s["setup_status"] == "DEVELOPING"]
 
@@ -238,6 +238,56 @@ def analyze_one(
 def get_signals(status: Optional[str] = None, limit: int = Query(100, ge=1, le=500), _: None = Depends(require_api_key)):
     signals = get_recent_signals(limit=limit, status=status)
     return {"signals": signals, "count": len(signals), "storage": "Vercel Blob (private)" if os.getenv("BLOB_READ_WRITE_TOKEN") else "unconfigured"}
+
+
+@app.get("/api/v1/scanner/status")
+def scanner_status():
+    """Expose scheduler-backed status derived from persisted GitHub Actions runs."""
+    now = datetime.now(timezone.utc)
+    scans = get_recent_scans(limit=50)
+    latest = scans[0] if scans else None
+    scheduled = next((item for item in scans if item.get("source") == "scheduled"), None)
+    last_scheduled = None
+    if scheduled and scheduled.get("timestamp_utc"):
+        try:
+            last_scheduled = datetime.fromisoformat(str(scheduled["timestamp_utc"]).replace("Z", "+00:00"))
+            if last_scheduled.tzinfo is None:
+                last_scheduled = last_scheduled.replace(tzinfo=timezone.utc)
+        except ValueError:
+            last_scheduled = None
+
+    # GitHub Actions workflow cron is */20 * * * * (UTC). A recent
+    # successful scheduled snapshot is the activation signal, not a browser timer.
+    next_minute = ((now.minute // 20) + 1) * 20
+    if next_minute >= 60:
+        next_run = now.replace(minute=0, second=0, microsecond=0) + __import__("datetime").timedelta(hours=1)
+    else:
+        next_run = now.replace(minute=next_minute, second=0, microsecond=0)
+    age_seconds = (now - last_scheduled).total_seconds() if last_scheduled else None
+    storage = storage_health()
+    active = bool(storage.get("available") and age_seconds is not None and 0 <= age_seconds <= 2400)
+    latest_data = latest.get("data_available") if latest else False
+    return {
+        "scheduler": "GitHub Actions",
+        "cron": "*/20 * * * *",
+        "timezone": "UTC",
+        "active": active,
+        "status": "ACTIVE" if active else "INACTIVE",
+        "scanning": False,
+        "last_successful_scan_utc": last_scheduled.isoformat() if last_scheduled else None,
+        "last_scan_utc": latest.get("timestamp_utc") if latest else None,
+        "next_scan_utc": next_run.isoformat(),
+        "last_scheduled_workflow_run_id": scheduled.get("workflow_run_id") if scheduled else None,
+        "scanned": latest.get("scanned", 0) if latest else 0,
+        "confirmed": latest.get("confirmed", 0) if latest else 0,
+        "developing": latest.get("developing", 0) if latest else 0,
+        "no_setup": latest.get("no_setup", 0) if latest else 0,
+        "data_available": bool(latest_data),
+        "storage": storage,
+        "latest_results": latest.get("results", []) if latest else [],
+        "recent_scans": [{k: v for k, v in item.items() if k != "results"} for item in scans],
+        "active_reason": "Recent successful scheduled workflow scan and persistent storage are available" if active else "No recent successful scheduled workflow scan; waiting for the next verified run",
+    }
 
 
 @app.get("/api/v1/storage/health")
