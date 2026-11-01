@@ -50,7 +50,7 @@ export default function PriceChart({ symbol = "EURUSD", timeframe = "15M" }: Pro
 
   useEffect(() => {
     let disposed = false;
-    let widget: { remove?: () => void } | undefined;
+    let widget: { remove?: () => void; onChartReady?: (callback: () => void) => void } | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
 
     const mountWidget = () => {
