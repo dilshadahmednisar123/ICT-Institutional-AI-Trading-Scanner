@@ -295,6 +295,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Verify main branch schedule context
         run: |
           test "$GITHUB_REF" = "refs/heads/main" || { echo "Scheduled/manual production scans must run from main"; exit 1; }
@@ -305,13 +306,19 @@ jobs:
           set -euo pipefail
           curl --fail --silent --show-error --max-time 30 "https://liquidity-nexus-api-agus-902e.vercel.app/api/v1/status" -o backend-status.json
           python - <<'PY'
-          import json, os
+          import json, os, subprocess
           status=json.load(open("backend-status.json"))
-          assert status.get("git_commit") == os.environ["EXPECTED_SHA"], {
-              "deployed_commit": status.get("git_commit"),
-              "expected_commit": os.environ["EXPECTED_SHA"],
-          }
-          print("Scanning deployed backend revision:", status["git_commit"])
+          deployed=status.get("git_commit")
+          expected=os.environ["EXPECTED_SHA"]
+          assert deployed and expected, {"deployed_commit":deployed,"expected_commit":expected}
+          if deployed != expected:
+              subprocess.run(["git", "fetch", "--no-tags", "origin", deployed, "--depth=1"], check=True)
+              diff=subprocess.run(["git", "diff", "--quiet", deployed, expected, "--", "backend/app", "backend/requirements.txt"])
+              assert diff.returncode == 0, {
+                  "deployed_commit": deployed, "expected_commit": expected,
+                  "reason": "backend application or dependencies changed after the deployed revision",
+              }
+          print("Scanning deployed backend application revision:", deployed, "workflow:", expected)
           PY
       - name: Run production ICT scan and verify persistence
         run: |
