@@ -88,11 +88,13 @@ export default function PriceChart({ symbol = "EURUSD", timeframe = "15M" }: Pro
         if (widget?.onChartReady) {
           widget.onChartReady(() => {
             if (!disposed) {
+              if (timeout) clearTimeout(timeout);
               setLoading(false);
               setError(null);
             }
           });
         } else {
+          if (timeout) clearTimeout(timeout);
           setLoading(false);
         }
       } catch (e) {
