@@ -377,7 +377,7 @@ jobs:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     name: ICT walk-forward backtest on Dukascopy historical data
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -420,6 +420,7 @@ jobs:
               print(path.name, "bars=", result["bars_used"], "trades=", result["total"],
                     "win_rate=", result["win_rate"], "net_R=", result["net_r"],
                     "profit_factor=", result["profit_factor"],
+                    "sampling_step_bars=", result["sampling_step_bars"],
                     "max_drawdown_R=", result["max_drawdown_r"],
                     "session_breaks=", result["session_breaks"],
                     "missing_candles=", result["missing_candles"])
