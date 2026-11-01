@@ -195,7 +195,7 @@ def run_backtest(
     symbol: str,
     timeframe: str = "15M",
     limit: int = 500,
-    step: int = 20,
+    step: int = 1,
     window_size: int = 200,
     min_rr: float = 0.0,
     historical_data: Optional[pd.DataFrame] = None,
