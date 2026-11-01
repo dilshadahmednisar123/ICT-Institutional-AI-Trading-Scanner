@@ -96,7 +96,7 @@ jobs:
           path: backend/historical-backtest.json
           if-no-files-found: error
       - name: Production market-data and persistent-history acceptance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
         env:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
         run: |
