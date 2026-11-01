@@ -658,3 +658,30 @@ def test_signal_history_excludes_legacy_yahoo_and_gc_futures_records(monkeypatch
         row["data_quality"]["provider"].startswith(("TwelveDataProvider", "DATA UNAVAILABLE"))
         for row in rows
     )
+
+
+def test_dukascopy_xau_daily_maintenance_break_is_not_counted_as_missing_data():
+    start = datetime(2026, 1, 1, 21, 0, tzinfo=timezone.utc)
+    rows = []
+    for i in range(220):
+        ts = start + timedelta(minutes=15 * i)
+        if i >= 100:
+            ts += timedelta(hours=1)
+        rows.append(candle(ts, 4000, 4002, 3998, 4001))
+    frame = pd.DataFrame(rows)
+
+    gold = backtest_module.run_backtest(
+        "XAUUSD", timeframe="15M", historical_data=frame,
+        historical_provider="Dukascopy historical bid candles",
+    )
+    eur = backtest_module.run_backtest(
+        "EURUSD", timeframe="15M", historical_data=frame,
+        historical_provider="Dukascopy historical bid candles",
+    )
+
+    assert gold.session_breaks == 1
+    assert gold.gaps_detected == 0
+    assert gold.missing_candles == 0
+    assert eur.session_breaks == 0
+    assert eur.gaps_detected == 1
+    assert eur.missing_candles == 4
