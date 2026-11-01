@@ -178,9 +178,14 @@ class BaseDataProvider(ABC):
         stale = age_minutes > FRESHNESS_MINUTES.get(tf, 150)
         provider = str(df.attrs.get("provider", provider_name))
         message = "OK" if not stale else f"Feed stale: latest candle closed {age_minutes:.0f} minutes ago"
-        weekend_closed = (now.weekday() == 5 or
-                          (now.weekday() == 6 and now.hour < 22) or
-                          (now.weekday() == 4 and now.hour >= 22))
+        # Twelve Data's XAU/USD commodity aggregate is specified as 24/7.
+        # FX pairs close for the weekend; do not apply that FX calendar to gold spot.
+        weekend_closed = (
+            symbol.upper() not in ("XAUUSD", "XAU/USD") and
+            (now.weekday() == 5 or
+             (now.weekday() == 6 and now.hour < 22) or
+             (now.weekday() == 4 and now.hour >= 22))
+        )
         market_status = "market_closed" if weekend_closed else ("stale" if stale else "open_or_recent")
         if weekend_closed:
             message = f"Market closed for weekend; last candle closed {age_minutes:.0f} minutes ago"
