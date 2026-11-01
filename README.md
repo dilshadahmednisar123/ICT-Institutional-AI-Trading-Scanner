@@ -14,8 +14,8 @@ Signal-only ICT scanner for Forex and Gold. **NO VALID SETUP = NO TRADE**.
 - Backend: FastAPI deployed as a Vercel Python function.
 - History: private Vercel Blob snapshots; scans are written as immutable JSON objects and read back by the history endpoint.
 - Automation: GitHub Actions scheduled workflow on `main`, every 20 minutes, invokes production scan and verifies persistence. The in-process APScheduler is not relied on for Vercel serverless scheduling.
-- Market data: authenticated Twelve Data only. Configure `TWELVE_DATA_API_KEY`; without it the API returns DATA UNAVAILABLE and no setups. Yahoo Finance is disabled for trading use; synthetic candles are test-only.
-- Gold: XAU/USD is accepted only from a Twelve Data account with commodity-data entitlement. No GC=F futures proxy is substituted for spot XAUUSD.
+- Market data: authenticated Twelve Data only. Configure `TWELVE_DATA_API_KEY` in both Vercel backend Environment Variables and GitHub Actions repository secrets; without it the API returns DATA UNAVAILABLE and no setups. See [Market Data Setup](docs/MARKET_DATA_SETUP.md). Yahoo Finance is disabled for trading use; synthetic candles are test-only.
+- Gold: XAU/USD is accepted only from a Twelve Data account with the required commodity-data entitlement. No GC=F futures proxy is substituted for spot XAUUSD. The current Dukascopy adapter is a stub, not an active fallback.
 - Candle validation: closed bars only, UTC timeframe alignment, duplicate/gap detection, stale-feed blocking, and complete lower-to-higher timeframe resampling.
 - Android: Capacitor wrapper. The release workflow requires a persistent Android signing keystore configured as GitHub Actions secrets; see `docs/ANDROID_RELEASE_SIGNING.md`.
 
@@ -46,6 +46,5 @@ NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 - The ICT engines are deterministic heuristics, not proof of institutional order flow or a guaranteed predictive edge.
 - Setup scores are confluence scores, not calibrated win probabilities.
 - Market-data freshness is validated; stale or unavailable candles result in NO_SETUP rather than a fabricated trade.
-- Yahoo Finance coverage and update cadence can vary. XAUUSD is a futures proxy.
 - The product is signal-only and does not execute trades.
 - Never commit API keys, Blob tokens, or Android signing material.
