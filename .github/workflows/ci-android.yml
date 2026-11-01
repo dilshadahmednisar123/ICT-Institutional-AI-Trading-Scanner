@@ -330,6 +330,9 @@ jobs:
           files: ${{ runner.temp }}/LIQUIDITY-NEXUS-release.apk
 
   scheduled-scan:
+    concurrency:
+      group: liquidity-nexus-production-scan
+      cancel-in-progress: false
     needs: deploy-vercel
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.deploy-vercel.result == 'success')
     name: Execute and verify 20-minute production scan
