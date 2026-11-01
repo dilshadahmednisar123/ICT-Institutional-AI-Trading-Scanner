@@ -19,8 +19,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  deploy-vercel:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: Deploy latest main to Vercel using CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install pinned Vercel CLI
+        run: npm install --global vercel@65.9.0
+      - name: Deploy production API
+        working-directory: backend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_Leu2DuvvU2i8MPBllkKp9yE2
+          VERCEL_PROJECT_ID: prj_DzDr5JXMjm4n4RWbSVNbu8f7Jz1C
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN" || { echo "::error::Missing GitHub secret VERCEL_TOKEN"; exit 1; }
+          vercel link --yes --project liquidity-nexus-api --scope agus-902e
+          vercel pull --yes --environment=production --scope agus-902e
+          vercel build --prod --scope agus-902e
+          vercel deploy --prebuilt --prod --scope agus-902e
+      - name: Deploy production frontend
+        working-directory: frontend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_Leu2DuvvU2i8MPBllkKp9yE2
+          VERCEL_PROJECT_ID: prj_0cteeLNwYMAtu829PLUJ09CvE9iQ
+        run: |
+          set -euo pipefail
+          vercel link --yes --project liquidity-nexus --scope agus-902e
+          vercel pull --yes --environment=production --scope agus-902e
+          vercel build --prod --scope agus-902e
+          vercel deploy --prebuilt --prod --scope agus-902e
+
   backend:
-    if: github.event_name != 'schedule'
+    needs: deploy-vercel
+    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || needs.deploy-vercel.result == 'success')
     name: Backend validation and production acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -71,7 +110,7 @@ jobs:
           from app.engines.backtest import run_backtest
           reports = []
           for symbol in ("EURUSD", "XAUUSD"):
-              report = run_backtest(symbol, timeframe="15M", limit=2000, step=20, window_size=200)
+              report = run_backtest(symbol, timeframe="15M", limit=2000, step=1, window_size=200)
               payload = report.to_dict()
               assert payload["bars_used"] >= 210, payload
               assert payload["period_start"] and payload["period_end"], payload
@@ -177,7 +216,8 @@ jobs:
           PY
 
   android-release:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs: deploy-vercel
+    if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && (github.event_name != 'workflow_dispatch' || needs.deploy-vercel.result == 'success')
     name: Build and verify signed Android release APK
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -290,7 +330,8 @@ jobs:
           files: ${{ runner.temp }}/LIQUIDITY-NEXUS-release.apk
 
   scheduled-scan:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: deploy-vercel
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.deploy-vercel.result == 'success')
     name: Execute and verify 20-minute production scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -374,7 +415,8 @@ jobs:
           retention-days: 7
 
   dukascopy-historical-research:
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    needs: deploy-vercel
+    if: ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.deploy-vercel.result == 'success')
     name: ICT walk-forward backtest on Dukascopy historical data
     runs-on: ubuntu-latest
     timeout-minutes: 120
