@@ -48,6 +48,7 @@ class BacktestTrade:
 class BacktestReport:
     symbol: str
     timeframe: str
+    sampling_step_bars: int = 1
     trades: List[BacktestTrade] = field(default_factory=list)
     total: int = 0
     wins: int = 0
