@@ -420,7 +420,7 @@ jobs:
               print(path.name, "bars=", result["bars_used"], "trades=", result["total"],
                     "win_rate=", result["win_rate"], "net_R=", result["net_r"],
                     "profit_factor=", result["profit_factor"],
-                    "max_drawdown_R=", result["max_drawdown_r"])
+                    "max_drawdown_R=", result["max_drawdown_r"],\n                    "session_breaks=", result["session_breaks"],\n                    "missing_candles=", result["missing_candles"])
           PY
       - uses: actions/upload-artifact@v4
         with:
