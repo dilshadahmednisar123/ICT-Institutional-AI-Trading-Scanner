@@ -52,7 +52,7 @@ def _list_blobs(limit: int = 1000) -> List[Dict[str, Any]]:
     return payload.get("blobs", []) if isinstance(payload, dict) else []
 
 
-def save_scan_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def save_scan_results(results: List[Dict[str, Any]], source: str = "manual", workflow_run_id: Optional[str] = None) -> Dict[str, Any]:
     """Persist one complete scan as an immutable private JSON blob."""
     if not _token():
         return {"stored": False, "reason": "BLOB_READ_WRITE_TOKEN is not configured"}
@@ -61,6 +61,13 @@ def save_scan_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     payload = {
         "timestamp_utc": now.isoformat(),
         "count": len(results),
+        "source": source if source in ("scheduled", "manual", "unknown") else "unknown",
+        "workflow_run_id": workflow_run_id,
+        "symbols": [str(item.get("symbol", "")) for item in results],
+        "confirmed": sum(1 for item in results if item.get("setup_status") == "CONFIRMED"),
+        "developing": sum(1 for item in results if item.get("setup_status") == "DEVELOPING"),
+        "no_setup": sum(1 for item in results if item.get("setup_status") not in ("CONFIRMED", "DEVELOPING")),
+        "data_available": all(bool((item.get("data_quality") or {}).get("is_valid")) for item in results),
         "results": results,
     }
     headers = {
@@ -143,3 +150,42 @@ def storage_health() -> Dict[str, Any]:
     except Exception as exc:
         logger.exception("Vercel Blob health check failed")
         return {"available": False, "provider": "Vercel Blob (private)", "reason": f"{type(exc).__name__}: {exc}"}
+
+
+
+def get_recent_scans(limit: int = 20) -> List[Dict[str, Any]]:
+    """Return immutable scan snapshots, including scheduler provenance."""
+    if not _token():
+        return []
+    try:
+        blobs = _list_blobs()
+        blobs.sort(key=lambda item: item.get("uploadedAt") or item.get("pathname", ""), reverse=True)
+        scans: List[Dict[str, Any]] = []
+        for blob in blobs[:max(1, min(limit, 100))]:
+            url = blob.get("url")
+            if not url:
+                continue
+            response = httpx.get(url, headers=_headers(), timeout=20.0)
+            response.raise_for_status()
+            snapshot = response.json()
+            results = snapshot.get("results", [])
+            if not isinstance(results, list):
+                continue
+            scans.append({
+                "timestamp_utc": snapshot.get("timestamp_utc"),
+                "source": snapshot.get("source", "unknown"),
+                "workflow_run_id": snapshot.get("workflow_run_id"),
+                "scanned": snapshot.get("count", len(results)),
+                "symbols": snapshot.get("symbols") or [item.get("symbol") for item in results],
+                "confirmed": snapshot.get("confirmed", sum(1 for item in results if item.get("setup_status") == "CONFIRMED")),
+                "developing": snapshot.get("developing", sum(1 for item in results if item.get("setup_status") == "DEVELOPING")),
+                "no_setup": snapshot.get("no_setup", sum(1 for item in results if item.get("setup_status") not in ("CONFIRMED", "DEVELOPING"))),
+                "data_available": snapshot.get("data_available", all(bool((item.get("data_quality") or {}).get("is_valid")) for item in results)),
+                "results": results,
+            })
+            if len(scans) >= limit:
+                break
+        return scans
+    except Exception:
+        logger.exception("Could not read persisted scan snapshots")
+        return []
