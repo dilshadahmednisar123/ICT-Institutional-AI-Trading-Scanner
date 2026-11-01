@@ -82,6 +82,7 @@ def main() -> None:
         "profit_factor": payload["profit_factor"],
         "max_drawdown_r": payload["max_drawdown_r"],
         "gaps_detected": payload["gaps_detected"],
+        "session_breaks": payload["session_breaks"],
         "missing_candles": payload["missing_candles"],
         "notes": payload["notes"],
     }, indent=2))
