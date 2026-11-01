@@ -50,6 +50,7 @@ def main() -> None:
     parser.add_argument("--csv", required=True, type=Path)
     parser.add_argument("--symbol", required=True, choices=("EURUSD", "XAUUSD"))
     parser.add_argument("--timeframe", default="15M")
+    parser.add_argument("--step", default=1, type=int, help="evaluate every N closed candles; use 1 for every-bar walk-forward")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -58,7 +59,7 @@ def main() -> None:
         args.symbol,
         timeframe=args.timeframe,
         limit=len(candles),
-        step=20,
+        step=args.step,
         window_size=200,
         historical_data=candles,
         historical_provider="Dukascopy historical bid candles",
@@ -74,6 +75,7 @@ def main() -> None:
         "symbol": args.symbol,
         "provider": payload["data_provider"],
         "bars": payload["bars_used"],
+        "sampling_step_bars": payload["sampling_step_bars"],
         "period_start": payload["period_start"],
         "period_end": payload["period_end"],
         "trades": payload["total"],
