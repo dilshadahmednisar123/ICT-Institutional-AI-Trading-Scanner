@@ -542,3 +542,50 @@ def test_bos_is_close_confirmed_after_confirmed_swing():
     ]
     events = detect_bos_choch(frame, swings, timeframe="15M")
     assert any(e.event_type == "BOS" and e.direction == "bullish" and e.confirmed_by_close for e in events)
+
+
+def test_backtest_accepts_injected_legitimate_historical_dataframe():
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    frame = pd.DataFrame([
+        candle(now + timedelta(minutes=15 * i), 1.1, 1.101, 1.099, 1.1)
+        for i in range(220)
+    ])
+    frame.attrs["provider"] = "Dukascopy historical bid candles"
+    report = backtest_module.run_backtest(
+        "EURUSD", timeframe="15M", limit=220, step=20, window_size=200,
+        historical_data=frame,
+    )
+    assert report.data_provider == "Dukascopy historical bid candles"
+    assert report.bars_used == 220
+    assert report.period_start is not None and report.period_end is not None
+
+
+def test_backtest_rejects_duplicate_historical_timestamps():
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        candle(now + timedelta(minutes=15 * i), 1.1, 1.101, 1.099, 1.1)
+        for i in range(220)
+    ]
+    rows[100]["timestamp"] = rows[99]["timestamp"]
+    report = backtest_module.run_backtest(
+        "EURUSD", timeframe="15M", historical_data=pd.DataFrame(rows),
+        historical_provider="Dukascopy historical bid candles",
+    )
+    assert report.bars_used == 0
+    assert report.duplicate_candles == 1
+    assert any("duplicate timestamps" in note for note in report.notes)
+
+
+def test_backtest_rejects_invalid_historical_ohlc():
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        candle(now + timedelta(minutes=15 * i), 1.1, 1.101, 1.099, 1.1)
+        for i in range(220)
+    ]
+    rows[50] = candle(now + timedelta(minutes=15 * 50), 1.1, 1.09, 1.08, 1.11)
+    report = backtest_module.run_backtest(
+        "EURUSD", timeframe="15M", historical_data=pd.DataFrame(rows),
+        historical_provider="Dukascopy historical bid candles",
+    )
+    assert report.bars_used == 0
+    assert any("invalid OHLC" in note for note in report.notes)
