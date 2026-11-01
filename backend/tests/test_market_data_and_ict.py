@@ -589,3 +589,22 @@ def test_backtest_rejects_invalid_historical_ohlc():
     )
     assert report.bars_used == 0
     assert any("invalid OHLC" in note for note in report.notes)
+
+
+def test_xauusd_spot_is_not_marked_closed_by_the_fx_weekend_calendar(monkeypatch):
+    fixed_now = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now if tz else fixed_now.replace(tzinfo=None)
+
+    monkeypatch.setattr(provider_module, "datetime", FrozenDateTime)
+    rows = [
+        candle(fixed_now - timedelta(minutes=15 * (20 - i)), 4000, 4002, 3998, 4001)
+        for i in range(20)
+    ]
+    frame = pd.DataFrame(rows)
+    report = StubProvider().validate(frame, "XAUUSD", "15M")
+    assert report.market_status == "open_or_recent"
+    assert not report.stale
