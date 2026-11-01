@@ -96,6 +96,8 @@ jobs:
           if-no-files-found: error
       - name: Production market-data and persistent-history acceptance
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
         run: |
           set -euo pipefail
           BASE="https://liquidity-nexus-api-agus-902e.vercel.app"
