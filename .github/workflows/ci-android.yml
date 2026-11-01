@@ -352,3 +352,63 @@ jobs:
           name: scheduled-ict-scan-results
           path: scan-results.json
           retention-days: 7
+
+  dukascopy-historical-research:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    name: ICT walk-forward backtest on Dukascopy historical data
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend analysis dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Download one year of legitimate spot and FX bid candles
+        run: |
+          set -euo pipefail
+          npx --yes dukascopy-node -i eurusd -from 2025-11-01 -to 2026-11-01 -t m15 -f csv -v
+          npx --yes dukascopy-node -i xauusd -from 2025-11-01 -to 2026-11-01 -t m15 -f csv -v
+          EUR_CSV="$(find download -type f -iname '*eurusd*m15*bid*.csv' | head -n 1)"
+          XAU_CSV="$(find download -type f -iname '*xauusd*m15*bid*.csv' | head -n 1)"
+          test -s "$EUR_CSV"
+          test -s "$XAU_CSV"
+          printf 'EURUSD dataset: %s\nXAUUSD dataset: %s\n' "$EUR_CSV" "$XAU_CSV"
+          echo "EUR_CSV=$EUR_CSV" >> "$GITHUB_ENV"
+          echo "XAU_CSV=$XAU_CSV" >> "$GITHUB_ENV"
+      - name: Run walk-forward ICT backtests and data-quality checks
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          python scripts/run_dukascopy_backtest.py --csv "../$EUR_CSV" --symbol EURUSD --timeframe 15M --output reports/eurusd-dukascopy-backtest.json
+          python scripts/run_dukascopy_backtest.py --csv "../$XAU_CSV" --symbol XAUUSD --timeframe 15M --output reports/xauusd-dukascopy-backtest.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in Path("reports").glob("*-dukascopy-backtest.json"):
+              result=json.loads(path.read_text())
+              assert result["bars_used"] >= 210, result
+              assert result["data_provider"].startswith("Dukascopy"), result
+              assert result["period_start"] and result["period_end"], result
+              print(path.name, "bars=", result["bars_used"], "trades=", result["total"],
+                    "win_rate=", result["win_rate"], "net_R=", result["net_r"],
+                    "profit_factor=", result["profit_factor"],
+                    "max_drawdown_R=", result["max_drawdown_r"])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ict-dukascopy-historical-backtests
+          path: |
+            backend/reports/*-dukascopy-backtest.json
+            download/*eurusd*m15*bid*.csv
+            download/*xauusd*m15*bid*.csv
+          if-no-files-found: error
+          retention-days: 30
+
