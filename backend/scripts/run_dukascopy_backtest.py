@@ -28,9 +28,16 @@ def load_dukascopy_csv(path: Path, symbol: str) -> pd.DataFrame:
     required = {"timestamp", "open", "high", "low", "close"}
     if not required.issubset(frame.columns):
         raise ValueError(f"Missing required OHLC columns in {path}: {sorted(required - set(frame.columns))}")
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+    # dukascopy-node CSV timestamps are Unix epoch milliseconds, not nanoseconds.
+    raw_timestamps = frame["timestamp"]
+    if pd.api.types.is_numeric_dtype(raw_timestamps):
+        frame["timestamp"] = pd.to_datetime(raw_timestamps, unit="ms", utc=True, errors="coerce")
+    else:
+        frame["timestamp"] = pd.to_datetime(raw_timestamps, utc=True, errors="coerce")
     if frame["timestamp"].isna().any():
         raise ValueError(f"Unparseable timestamps in {path}")
+    if frame["timestamp"].max() < pd.Timestamp("2000-01-01", tz="UTC"):
+        raise ValueError(f"Timestamps in {path} appear to be misinterpreted epoch values")
     for column in ("open", "high", "low", "close"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame = frame.sort_values("timestamp").reset_index(drop=True)
