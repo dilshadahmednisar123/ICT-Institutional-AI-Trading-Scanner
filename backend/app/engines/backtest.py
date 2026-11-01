@@ -73,6 +73,7 @@ class BacktestReport:
         return {
             "symbol": self.symbol,
             "timeframe": self.timeframe,
+            "sampling_step_bars": self.sampling_step_bars,
             "total": self.total,
             "wins": self.wins,
             "losses": self.losses,
@@ -207,7 +208,7 @@ def run_backtest(
     else:
         df = historical_data.copy()
         default_provider = historical_provider
-    report = BacktestReport(symbol=symbol, timeframe=timeframe)
+    report = BacktestReport(symbol=symbol, timeframe=timeframe, sampling_step_bars=step)
     if df is not None:
         report.data_provider = str(df.attrs.get("provider", default_provider))
         if not df.empty:
@@ -272,6 +273,7 @@ def run_backtest(
                 report.period_start = str(df.iloc[0]["timestamp"])
                 report.period_end = str(df.iloc[-1]["timestamp"])
     report.notes.append("Walk-forward on closed historical candles only; no forming-bar lookahead")
+    report.notes.append(f"Walk-forward sampling step: every {step} closed candle(s)")
     report.notes.append(f"Historical data provider: {report.data_provider}; bars: {report.bars_used}")
     report.notes.append("Same-candle SL+TP ambiguity → SL (conservative)")
     report.notes.append("Research tool only — does not claim profitability")
