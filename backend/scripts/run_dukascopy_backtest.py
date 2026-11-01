@@ -8,9 +8,12 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import pandas as pd
 
+# Running this file from backend/scripts does not automatically put backend/ on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.engines.backtest import run_backtest
 
 
