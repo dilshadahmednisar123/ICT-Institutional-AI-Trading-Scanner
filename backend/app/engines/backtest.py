@@ -15,7 +15,7 @@ from typing import List, Optional, Dict, Any, Literal
 import logging
 import pandas as pd
 
-from ..data.provider import get_provider
+from ..data.provider import get_provider, only_closed_candles, TF_MINUTES
 from .structure import find_swing_points, classify_structure, detect_bos_choch
 from .fvg import detect_fvgs, get_active_fvgs
 from .liquidity import build_liquidity_map, detect_sweeps
@@ -58,6 +58,10 @@ class BacktestReport:
     avg_r: float = 0.0
     profit_factor: float = 0.0
     max_consecutive_losses: int = 0
+    max_drawdown_r: float = 0.0
+    gaps_detected: int = 0
+    missing_candles: int = 0
+    duplicate_candles: int = 0
     data_provider: str = "unavailable"
     bars_used: int = 0
     period_start: Optional[str] = None
@@ -77,6 +81,10 @@ class BacktestReport:
             "avg_r": round(self.avg_r, 3),
             "profit_factor": round(self.profit_factor, 3),
             "max_consecutive_losses": self.max_consecutive_losses,
+            "max_drawdown_r": round(self.max_drawdown_r, 3),
+            "gaps_detected": self.gaps_detected,
+            "missing_candles": self.missing_candles,
+            "duplicate_candles": self.duplicate_candles,
             "data_provider": self.data_provider,
             "bars_used": self.bars_used,
             "period_start": self.period_start,
@@ -187,16 +195,68 @@ def run_backtest(
     step: int = 20,
     window_size: int = 200,
     min_rr: float = 0.0,
+    historical_data: Optional[pd.DataFrame] = None,
+    historical_provider: str = "external_historical_dataset",
 ) -> BacktestReport:
-    provider = get_provider("auto")
-    df = provider.get_ohlc(symbol, timeframe, limit=limit)
+    if historical_data is None:
+        provider = get_provider("auto")
+        df = provider.get_ohlc(symbol, timeframe, limit=limit)
+        default_provider = provider.__class__.__name__
+    else:
+        df = historical_data.copy()
+        default_provider = historical_provider
     report = BacktestReport(symbol=symbol, timeframe=timeframe)
     if df is not None:
-        report.data_provider = str(df.attrs.get("provider", provider.__class__.__name__))
+        report.data_provider = str(df.attrs.get("provider", default_provider))
         if not df.empty:
+            required = {"timestamp", "open", "high", "low", "close"}
+            if not required.issubset(df.columns):
+                report.notes.append(f"Historical dataset rejected: missing columns {sorted(required - set(df.columns))}")
+                return report
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+            for column in ("open", "high", "low", "close"):
+                df[column] = pd.to_numeric(df[column], errors="coerce")
+            if df["timestamp"].isna().any() or df[["open", "high", "low", "close"]].isna().any().any():
+                report.notes.append("Historical dataset rejected: invalid timestamps or non-numeric OHLC values")
+                return report
+            if not df["timestamp"].is_monotonic_increasing:
+                df = df.sort_values("timestamp").reset_index(drop=True)
+                report.notes.append("Historical timestamps were sorted ascending before analysis")
+            report.duplicate_candles = int(df["timestamp"].duplicated(keep="last").sum())
+            if report.duplicate_candles:
+                report.notes.append(f"Historical dataset rejected: {report.duplicate_candles} duplicate timestamps")
+                return report
+            invalid = (
+                (df["high"] < df[["open", "close", "low"]].max(axis=1)) |
+                (df["low"] > df[["open", "close", "high"]].min(axis=1)) |
+                (df[["open", "high", "low", "close"]] <= 0).any(axis=1)
+            )
+            if invalid.any():
+                report.notes.append(f"Historical dataset rejected: {int(invalid.sum())} invalid OHLC candles")
+                return report
+            minutes = TF_MINUTES.get(timeframe.upper(), 15)
+            if timeframe.upper() == "1D":
+                aligned = df["timestamp"].dt.floor("1D")
+            elif timeframe.upper() in TF_MINUTES:
+                aligned = df["timestamp"].dt.floor(f"{minutes}min")
+            else:
+                aligned = df["timestamp"]
+            misaligned = int((df["timestamp"] != aligned).sum())
+            if misaligned:
+                report.notes.append(f"Historical dataset rejected: {misaligned} misaligned candle timestamps")
+                return report
+            diffs = df["timestamp"].diff().dropna()
+            gap_mask = (diffs > pd.Timedelta(minutes=minutes * 1.5)) & (diffs <= pd.Timedelta(hours=6))
+            report.gaps_detected = int(gap_mask.sum())
+            report.missing_candles = sum(
+                max(1, int(round(delta.total_seconds() / (minutes * 60))) - 1)
+                for delta in diffs[gap_mask]
+            )
+            df = only_closed_candles(df, timeframe)
             report.bars_used = len(df)
-            report.period_start = str(df.iloc[0]["timestamp"])
-            report.period_end = str(df.iloc[-1]["timestamp"])
+            if not df.empty:
+                report.period_start = str(df.iloc[0]["timestamp"])
+                report.period_end = str(df.iloc[-1]["timestamp"])
     report.notes.append("Walk-forward on closed historical candles only; no forming-bar lookahead")
     report.notes.append(f"Historical data provider: {report.data_provider}; bars: {report.bars_used}")
     report.notes.append("Same-candle SL+TP ambiguity → SL (conservative)")
@@ -257,4 +317,10 @@ def run_backtest(
         else:
             consec = 0
     report.max_consecutive_losses = max_c
+    equity = peak = max_drawdown = 0.0
+    for trade in report.trades:
+        equity += trade.r_multiple
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    report.max_drawdown_r = max_drawdown
     return report
