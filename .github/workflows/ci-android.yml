@@ -15,7 +15,8 @@ permissions:
 
 concurrency:
   group: liquidity-nexus-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'schedule' && 'scheduled' || github.event_name == 'workflow_dispatch' && 'manual' || github.event_name == 'pull_request' && github.event.pull_request.number || 'push' }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  # Historical data downloads and production acceptance must finish; queue newer pushes instead of canceling active work.
+  cancel-in-progress: false
 
 jobs:
   backend:
