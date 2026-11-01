@@ -37,7 +37,7 @@ Create:
 - Value: your Twelve Data API key
 - Environments: Production, Preview, Development (at minimum, Production)
 
-Save, then redeploy the backend production deployment so the function receives the variable.
+Save. The final manual workflow dispatch redeploys the backend using the Vercel CLI; configure the required `VERCEL_TOKEN` as described in [Vercel CLI Deployment](VERCEL_CLI_DEPLOYMENT.md). If you redeploy manually instead, select the latest `main` commit, not the older production deployment revision.
 
 ### GitHub Actions
 
