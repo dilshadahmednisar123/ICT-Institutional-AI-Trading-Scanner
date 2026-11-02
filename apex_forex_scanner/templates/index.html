@@ -52,6 +52,7 @@ async function scan(){
   finally{$("scan").disabled=false;$("scan").textContent="SCAN 28 PAIRS";}
 }
 $("scan").addEventListener("click",scan);
+scan(); // Run the first scan automatically when the dashboard opens.
 setInterval(()=>{if(!$("scan").disabled)scan();},20*60*1000);
 </script>
 </body>
